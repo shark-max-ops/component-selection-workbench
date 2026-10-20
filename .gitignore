@@ -1,0 +1,22 @@
+# 本地密钥与环境配置
+.env
+.env.*
+!.env.example
+
+# Python 虚拟环境与缓存
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# 本地手册、数据库、解析结果与任务输出
+/runtime/
+
+# 本地编辑器配置
+.vscode/

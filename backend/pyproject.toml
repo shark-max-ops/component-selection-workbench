@@ -1,0 +1,31 @@
+[project]
+name = "component-selection-backend"
+version = "0.1.0"
+description = "面向电子设计的器件选型与证据核验工作台后端"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "deepagents==0.7.22",
+    "langchain==1.4.3",
+    "langchain-core==1.6.6",
+    "langchain-openai==1.6.7",
+    "langgraph==1.2.13",
+    "pydantic>=2.14.1",
+    "pymupdf>=2.0",
+    "python-dotenv>=1.2.4,<2",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]

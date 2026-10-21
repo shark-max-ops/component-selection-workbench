@@ -1,8 +1,9 @@
 """统一创建本项目的 DeepAgents Harness。"""
 
 from deepagents import create_deep_agent
-from langchain.agents.middleware import TodoListMiddleware
+from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from app.config import load_settings
@@ -33,13 +34,15 @@ def create_workbench_agent(
     tools: list[BaseTool] | None = None,
     skills: list[str] | None = None,
     system_prompt: str | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+    middleware: list[AgentMiddleware] | None = None,
 ) -> CompiledStateGraph:
-    """创建带文件权限的工作台 Agent。
+    """创建工作台 Agent。
 
-    输入：可选业务工具、虚拟 Skill 目录和系统提示词。
+    输入：业务工具、Skill、提示词、检查点和附加 Middleware。
     输出：可调用的 DeepAgents 图对象。
-    要点：所有现有运行入口统一采用本项目的文件权限。
-    边界：仍使用 StateBackend，无持久化恢复；自定义工具自行校验。
+    要点：保留统一文件权限，旧入口不传新参数时行为不变。
+    边界：StateBackend 的跨进程保存依赖持久化 Checkpointer。
     """
     model = create_chat_model(load_settings())
 
@@ -48,6 +51,10 @@ def create_workbench_agent(
         tools=tools or [],
         skills=skills,
         permissions=build_file_permissions(),
-        system_prompt=SYSTEM_PROMPT if system_prompt is None else system_prompt,
-        middleware=[TodoListMiddleware()],
+        system_prompt=(SYSTEM_PROMPT if system_prompt is None else system_prompt),
+        checkpointer=checkpointer,
+        middleware=[
+            TodoListMiddleware(),
+            *(middleware or []),
+        ],
     )

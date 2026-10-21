@@ -1,7 +1,8 @@
-"""统一创建本项目的最小 DeepAgents Harness。"""
+"""统一创建本项目的 DeepAgents Harness。"""
 
 from deepagents import create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from app.config import load_settings
@@ -26,18 +27,25 @@ SYSTEM_PROMPT = """你是器件核验工作台的报告整理 Agent。
 """
 
 
-def create_workbench_agent() -> CompiledStateGraph:
-    """创建最小 Agent。
+def create_workbench_agent(
+    *,
+    tools: list[BaseTool] | None = None,
+    skills: list[str] | None = None,
+    system_prompt: str | None = None,
+) -> CompiledStateGraph:
+    """创建工作台 Agent。
 
-    输入：由现有配置模块读取的模型配置。
+    输入：可选业务工具、虚拟 Skill 目录和系统提示词。
     输出：可调用的 DeepAgents 图对象。
-    边界：使用默认 StateBackend；未配置 Checkpointer，
-    不支持进程重启恢复。
+    要点：不传参数时保留上一版报告整理行为。
+    边界：使用默认 StateBackend，未配置持久化 Checkpointer。
     """
     model = create_chat_model(load_settings())
 
     return create_deep_agent(
         model=model,
-        system_prompt=SYSTEM_PROMPT,
+        tools=tools or [],
+        skills=skills,
+        system_prompt=(SYSTEM_PROMPT if system_prompt is None else system_prompt),
         middleware=[TodoListMiddleware()],
     )

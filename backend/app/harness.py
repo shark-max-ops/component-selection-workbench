@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from app.config import load_settings
+from app.file_permissions import build_file_permissions
 from app.llm import create_chat_model
 
 SYSTEM_PROMPT = """你是器件核验工作台的报告整理 Agent。
@@ -33,12 +34,12 @@ def create_workbench_agent(
     skills: list[str] | None = None,
     system_prompt: str | None = None,
 ) -> CompiledStateGraph:
-    """创建工作台 Agent。
+    """创建带文件权限的工作台 Agent。
 
     输入：可选业务工具、虚拟 Skill 目录和系统提示词。
     输出：可调用的 DeepAgents 图对象。
-    要点：不传参数时保留上一版报告整理行为。
-    边界：使用默认 StateBackend，未配置持久化 Checkpointer。
+    要点：所有现有运行入口统一采用本项目的文件权限。
+    边界：仍使用 StateBackend，无持久化恢复；自定义工具自行校验。
     """
     model = create_chat_model(load_settings())
 
@@ -46,6 +47,7 @@ def create_workbench_agent(
         model=model,
         tools=tools or [],
         skills=skills,
-        system_prompt=(SYSTEM_PROMPT if system_prompt is None else system_prompt),
+        permissions=build_file_permissions(),
+        system_prompt=SYSTEM_PROMPT if system_prompt is None else system_prompt,
         middleware=[TodoListMiddleware()],
     )

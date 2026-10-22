@@ -14,9 +14,9 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-import app.harness as harness
+import app.agents.harness as harness
+from app.agents.state_sync import PersistAdcRecords, merge_adc_records, restore_session
 from app.contracts import ConstraintResult, Evidence, NumericValue, ParameterFact
-from app.persistence import PersistAdcRecords, merge_adc_records, restore_session
 
 
 class OfflineModel(FakeMessagesListChatModel):

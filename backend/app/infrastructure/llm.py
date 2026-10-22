@@ -6,8 +6,8 @@ from app.config import Settings
 
 
 def create_chat_model(settings: Settings) -> ChatOpenAI:
-    """创建兼容 OpenAI Chat Completions 接口的客户端。
-
+    """
+    作用：创建兼容 OpenAI Chat Completions 接口的客户端。
     输入：经过检查的项目配置。
     输出：ChatOpenAI 实例。
     要点：设置单次请求超时和有限重试；创建对象时不发起请求。

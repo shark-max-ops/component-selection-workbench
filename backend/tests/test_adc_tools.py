@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.adc_tools import build_adc_tools
+from app.agents.tools import build_adc_tools
 from app.contracts import AdcRequirements
-from app.documents import RegisteredDocument
+from app.infrastructure.documents import RegisteredDocument
 
 
 def make_case(

@@ -5,7 +5,7 @@ from deepagents.backends.utils import create_file_data, file_data_to_string
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 
-import app.harness as harness
+import app.agents.harness as harness
 
 SEED = {
     "/inputs/task.json": '{"voltage": "6"}',

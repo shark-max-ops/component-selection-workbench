@@ -6,9 +6,9 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
+from app.agents.file_permissions import build_file_permissions
 from app.config import load_settings
-from app.file_permissions import build_file_permissions
-from app.llm import create_chat_model
+from app.infrastructure.llm import create_chat_model
 
 SYSTEM_PROMPT = """你是器件核验工作台的报告整理 Agent。
 本轮只验证运行骨架，不重新判断器件性能。
@@ -37,8 +37,8 @@ def create_workbench_agent(
     checkpointer: BaseCheckpointSaver | None = None,
     middleware: list[AgentMiddleware] | None = None,
 ) -> CompiledStateGraph:
-    """创建工作台 Agent。
-
+    """
+    作用：创建工作台 Agent。
     输入：业务工具、Skill、提示词、检查点和附加 Middleware。
     输出：可调用的 DeepAgents 图对象。
     要点：保留统一文件权限，旧入口不传新参数时行为不变。

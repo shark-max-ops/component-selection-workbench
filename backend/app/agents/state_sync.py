@@ -12,12 +12,12 @@ from langgraph.types import Command
 from app.contracts import ConstraintResult, Evidence, ParameterFact
 
 if TYPE_CHECKING:
-    from app.adc_tools import SupplySession
+    from app.agents.tools import SupplySession
 
 
 def merge_adc_records(current: dict, incoming: dict) -> dict:
-    """合并业务记录。
-
+    """
+    作用：合并业务记录。
     输入：已有记录和本次更新。
     输出：合并后的记录。
     要点：重复值复用，冲突值拒绝，空值不覆盖已有记录。
@@ -35,13 +35,21 @@ def merge_adc_records(current: dict, incoming: dict) -> dict:
 
 
 class PersistentAdcState(AgentState, total=False):
-    """增加业务记录字段，并处理同一步多个工具的状态更新。"""
+    """
+    作用：增加业务记录字段，并处理同一步多个工具的状态更新。
+    输入：类定义字段或当前调用上下文，见下方说明。
+    输出：原有处理结果；具体返回值或副作用见下方实现。
+    """
 
     adc_records: Annotated[dict[str, Any], merge_adc_records]
 
 
 def snapshot_session(session: SupplySession) -> dict:
-    """输入运行时业务记录，输出可写入检查点的普通 JSON 数据。"""
+    """
+    作用：输入运行时业务记录，输出可写入检查点的普通 JSON 数据。
+    输入：session，含义见字段和下方说明。
+    输出：原有处理结果；具体返回值或副作用见下方实现。
+    """
     return {
         "evidence": (session.evidence.model_dump(mode="json") if session.evidence else None),
         "parameter_fact": (session.fact.model_dump(mode="json") if session.fact else None),
@@ -50,8 +58,8 @@ def snapshot_session(session: SupplySession) -> dict:
 
 
 def restore_session(state: dict, session: SupplySession) -> None:
-    """根据已保存图状态重建运行时对象。
-
+    """
+    作用：根据已保存图状态重建运行时对象。
     输入：图状态和本次创建的 SupplySession。
     输出：原地更新运行时对象。
     边界：没有记录时不恢复；不执行新的业务核验。
@@ -89,21 +97,37 @@ def restore_session(state: dict, session: SupplySession) -> None:
 
 
 class PersistAdcRecords(AgentMiddleware):
-    """在业务工具返回后同步图状态，在下一次执行前恢复业务对象。"""
+    """
+    作用：在业务工具返回后同步图状态，在下一次执行前恢复业务对象。
+    输入：类定义字段或当前调用上下文，见下方说明。
+    输出：原有处理结果；具体返回值或副作用见下方实现。
+    """
 
     state_schema = PersistentAdcState
 
     def __init__(self, session: SupplySession):
-        """输入当前运行时对象，绑定本任务的业务记录镜像。"""
+        """
+        作用：输入当前运行时对象，绑定本任务的业务记录镜像。
+        输入：session，含义见字段和下方说明。
+        输出：原有处理结果；具体返回值或副作用见下方实现。
+        """
         self.session = session
 
     def before_agent(self, state, runtime):
-        """每次 invoke 开始时，从线程状态恢复业务对象。"""
+        """
+        作用：每次 invoke 开始时，从线程状态恢复业务对象。
+        输入：state、runtime，含义见字段和下方说明。
+        输出：原有处理结果；具体返回值或副作用见下方实现。
+        """
         restore_session(state, self.session)
         return None
 
     def wrap_tool_call(self, request, handler):
-        """执行真实工具，再将消息与业务记录交回图运行时。"""
+        """
+        作用：执行真实工具，再将消息与业务记录交回图运行时。
+        输入：request、handler，含义见字段和下方说明。
+        输出：原有处理结果；具体返回值或副作用见下方实现。
+        """
         response = handler(request)
 
         if request.tool_call["name"] not in {

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from langchain_core.tools import BaseTool, tool
 
+from app.adc.extractors import extract_ads1115_supply
+from app.adc.rules import check_supply_voltage
 from app.contracts import (
     AdcRequirements,
     ConstraintResult,
@@ -12,19 +14,26 @@ from app.contracts import (
     ParameterFact,
     Text,
 )
-from app.documents import RegisteredDocument, extract_ads1115_supply
-from app.rules import check_supply_voltage
+from app.infrastructure.documents import RegisteredDocument
 
 
 class EvidenceQuery(Contract):
-    """证据查询参数；继承禁止未知字段的配置。"""
+    """
+    作用：证据查询参数；继承禁止未知字段的配置。
+    输入：类定义字段或当前调用上下文，见下方说明。
+    输出：原有处理结果；具体返回值或副作用见下方实现。
+    """
 
     document_id: Text
     part_number: Text
 
 
 class SupplyQuery(Contract):
-    """核验只接受引用 ID，不接受模型传入电压或审核状态。"""
+    """
+    作用：核验只接受引用 ID，不接受模型传入电压或审核状态。
+    输入：类定义字段或当前调用上下文，见下方说明。
+    输出：原有处理结果；具体返回值或副作用见下方实现。
+    """
 
     fact_id: Text
     evidence_id: Text
@@ -32,8 +41,10 @@ class SupplyQuery(Contract):
 
 @dataclass
 class SupplySession:
-    """保存本次实际工具产物。
-
+    """
+    作用：保存本次实际工具产物。
+    输入：类定义字段或当前调用上下文，见下方说明。
+    输出：原有处理结果；具体返回值或副作用见下方实现。
     由宿主程序持有，模型不能通过修改虚拟文件直接修改此对象。
     """
 
@@ -47,8 +58,8 @@ def build_adc_tools(
     document: RegisteredDocument,
     reviewed: bool = False,
 ) -> tuple[list[BaseTool], SupplySession]:
-    """创建绑定本次任务的业务工具。
-
+    """
+    作用：创建绑定本次任务的业务工具。
     输入：需求、文档和用户声明的人工审核状态。
     输出：工具列表及宿主业务记录。
     边界：仅覆盖 ADS1115 供电，不提供任意路径或代码执行入口。
@@ -62,7 +73,11 @@ def build_adc_tools(
         document_id: str,
         part_number: str,
     ) -> dict:
-        """读取指定文档中 ADS1115 的推荐供电证据与参数声明。"""
+        """
+        作用：读取指定文档中 ADS1115 的推荐供电证据与参数声明。
+        输入：document_id、part_number，含义见字段和下方说明。
+        输出：原有处理结果；具体返回值或副作用见下方实现。
+        """
         if document_id != document.id or part_number != "ADS1115":
             return {
                 "ok": False,
@@ -97,7 +112,11 @@ def build_adc_tools(
         fact_id: str,
         evidence_id: str,
     ) -> dict:
-        """对已读取的参数和证据执行固定需求下的供电核验。"""
+        """
+        作用：对已读取的参数和证据执行固定需求下的供电核验。
+        输入：fact_id、evidence_id，含义见字段和下方说明。
+        输出：原有处理结果；具体返回值或副作用见下方实现。
+        """
         if session.fact is None or session.evidence is None:
             return {
                 "ok": False,

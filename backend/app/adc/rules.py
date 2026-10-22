@@ -1,5 +1,6 @@
 """检查指定候选的供电电压是否落在推荐范围内。"""
 
+from app.adc.extractors import extract_ads1115_supply
 from app.contracts import (
     AdcRequirements,
     ConstraintResult,
@@ -7,7 +8,7 @@ from app.contracts import (
     NumericValue,
     ParameterFact,
 )
-from app.documents import RegisteredDocument, extract_ads1115_supply
+from app.infrastructure.documents import RegisteredDocument
 
 
 def check_supply_voltage(
@@ -16,8 +17,8 @@ def check_supply_voltage(
     evidence: Evidence,
     document: RegisteredDocument,
 ) -> ConstraintResult:
-    """执行单条供电核验。
-
+    """
+    作用：执行单条供电核验。
     输入：需求、参数声明、原文证据和当前导入的文档。
     输出：满足、不满足或待确认的单项结果。
     边界：只支持本轮提取器；不代表整机适用，不汇总多来源冲突。

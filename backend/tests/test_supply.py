@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from app.adc.extractors import extract_ads1115_supply
+from app.adc.rules import check_supply_voltage
 from app.contracts import AdcRequirements
-from app.documents import RegisteredDocument, extract_ads1115_supply
-from app.rules import check_supply_voltage
+from app.infrastructure.documents import RegisteredDocument
 
 
 @pytest.fixture

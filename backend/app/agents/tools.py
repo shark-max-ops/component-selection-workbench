@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from langchain_core.tools import BaseTool, tool
 
-from app.adc.extractors import extract_ads1115_supply
+from app.adc.bounded_extract import extract_with_bounds
 from app.adc.rules import check_supply_voltage
 from app.contracts import (
     AdcRequirements,
@@ -52,16 +52,19 @@ class SupplySession:
     evidence: Evidence | None = None
     fact: ParameterFact | None = None
     result: ConstraintResult | None = None
+    extract_attempts: int = 0
 
 
 def build_adc_tools(
     requirements: AdcRequirements,
     document: RegisteredDocument,
     reviewed: bool = False,
+    cancelled=None,
 ) -> tuple[list[BaseTool], SupplySession]:
     """
     作用：创建绑定需求和文档的供电业务工具。
-    输入：requirements - 需求；document - 已登记文档；reviewed - 宿主审核状态。
+    输入：requirements - 需求；document - 已登记文档；reviewed - 宿主审核状态；
+          cancelled - 可选取消检查函数。
     输出：tuple[list[BaseTool], SupplySession]，工具列表和宿主业务对象。
     """
     # 仅覆盖 ADS1115 供电，不提供任意路径或代码执行入口。
@@ -93,10 +96,13 @@ def build_adc_tools(
             }
 
         # 提取原文和参数，格式不匹配时返回可解释的工具错误。
-        try:
-            evidence, fact = extract_ads1115_supply(document)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
+        # 仅对纯提取的临时失败有限重试；不会重复写入业务记录。
+        evidence, fact, attempts, error = extract_with_bounds(
+            document, cancelled=cancelled or (lambda: False)
+        )
+        session.extract_attempts += attempts
+        if error:
+            return {"ok": False, "error": error, "attempts": attempts}
 
         # 审核状态来自宿主，不接受模型传入。
         fact.reviewed = reviewed
@@ -108,6 +114,7 @@ def build_adc_tools(
             "evidence": evidence.model_dump(mode="json"),
             "parameter_fact": fact.model_dump(mode="json"),
             "page_path": (f"/documents/pages/{evidence.pdf_page:04d}.txt"),
+            "attempts": attempts,
         }
 
     @tool(args_schema=SupplyQuery)

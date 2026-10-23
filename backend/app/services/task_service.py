@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from datetime import UTC, datetime
@@ -178,6 +179,10 @@ def get_task_status(task_id: str, *, root: Path = ROOT) -> dict:
         for path in (task_dir / "runs").glob("*/manifest.json")
     ]
     latest_run = max(runs, key=lambda item: item["started_at"], default={})
+    cancel_path = task_dir / "cancel.json"
+    cancellation = (
+        json.loads(cancel_path.read_text(encoding="utf-8")) if cancel_path.exists() else None
+    )
     return {
         "task_id": meta["task_id"],
         "thread_id": meta["thread_id"],
@@ -187,10 +192,14 @@ def get_task_status(task_id: str, *, root: Path = ROOT) -> dict:
         "review_revision": reviews[-1]["revision"] if reviews else 0,
         "reviews": reviews,
         "pending": pending,
-        "execution_status": "waiting_input"
+        "execution_status": "cancelled"
+        if cancellation
+        else "waiting_input"
         if pending
         else (
-            latest_run["status"]
+            "cancelled"
+            if cancellation and latest_run.get("status") in {"running", "failed", "cancelled"}
+            else latest_run["status"]
             if latest_run.get("status") in {"running", "failed"}
             else "unfinished"
             if any(k.startswith("branch:to:") and v for k, v in values.items())
@@ -199,6 +208,7 @@ def get_task_status(task_id: str, *, root: Path = ROOT) -> dict:
             else "created"
         ),
         "human_response": values.get("human_response"),
+        "cancellation": cancellation,
     }
 
 
@@ -341,7 +351,90 @@ def send_message(
     with task_write(root / task_id):
         if get_task_status(task_id, root=root)["pending"]:
             raise HumanInputError("任务正在等待输入，请使用 /resume；普通消息不能恢复。")
+        if (root / task_id / "cancel.json").exists():
+            raise HumanInputError("任务已取消，请使用 /retry 检查是否可以恢复。")
         return _send_message(task_id, message, root=root, on_event=on_event)
+
+
+def cancel_task(task_id: str, *, root: Path = ROOT) -> dict:
+    """
+    作用：记录对当前运行或等待事项的取消请求。
+    输入：task_id - 任务 ID；root - 任务根目录。
+    输出：dict，取消请求及时间。
+    """
+    load_task(task_id, root=root)
+    task_dir = root / task_id
+    target = task_dir / "cancel.json"
+    if target.exists():
+        return json.loads(target.read_text(encoding="utf-8"))
+    # 只读运行清单判断能否取消，避免与执行进程的检查点写锁竞争。
+    runs = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (task_dir / "runs").glob("*/manifest.json")
+    ]
+    latest = max(runs, key=lambda item: item["started_at"], default={})
+    if latest.get("status") not in {"running", "waiting_input"}:
+        raise ValueError("当前没有可取消的运行或等待事项。")
+    # 请求独立落盘，使持有任务写锁的运行能在下一工具边界检查它。
+    record = {"task_id": task_id, "requested_at": datetime.now(UTC).isoformat()}
+    temporary = task_dir / f"cancel-{uuid4().hex}.tmp"
+    save_json(temporary, record)
+    os.replace(temporary, target)
+    return record
+
+
+def retry_task(task_id: str, *, root: Path = ROOT, on_event=None) -> dict:
+    """
+    作用：从已完成图节点的失败运行发起一次受限恢复。
+    输入：task_id - 任务 ID；root - 任务根目录；on_event - 可选事件回调。
+    输出：dict，新运行的清单、报告及答复。
+    """
+    load_task(task_id, root=root)
+    with task_write(root / task_id):
+        task_dir = root / task_id
+        status = get_task_status(task_id, root=root)
+        runs = [
+            json.loads(p.read_text(encoding="utf-8"))
+            for p in (task_dir / "runs").glob("*/manifest.json")
+        ]
+        latest = max(runs, key=lambda item: item["started_at"], default={})
+        if (
+            not status["checkpoint_exists"]
+            or status["pending"]
+            or any(
+                k.startswith("branch:to:") and v
+                for k, v in _checkpoint_values(task_dir, task_id).items()
+            )
+            or latest.get("status") not in {"failed", "cancelled"}
+        ):
+            raise ValueError("仅支持有完整检查点且无待执行节点的失败运行恢复。")
+        if sum(bool(item.get("recovered_from")) for item in runs) >= 1:
+            raise ValueError("本任务已使用一次失败恢复预算。")
+        # 已结束的取消请求不会影响新尝试，原运行清单仍保留取消结果。
+        (task_dir / "cancel.json").unlink(missing_ok=True)
+        return _send_message(
+            task_id,
+            "请基于已有记录完成供电核验与报告。",
+            root=root,
+            on_event=on_event,
+            recovery=latest["run_id"],
+        )
+
+
+def _checkpoint_values(task_dir: Path, task_id: str) -> dict:
+    """
+    作用：只读取得当前线程的原始图状态。
+    输入：task_dir - 任务目录；task_id - 任务 ID。
+    输出：dict，图通道状态。
+    """
+    database = task_dir / "checkpoints.sqlite"
+    if not database.exists():
+        return {}
+    with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        saver = SqliteSaver(db)
+        saver.is_setup = True
+        item = saver.get_tuple({"configurable": {"thread_id": task_id}})
+        return item.checkpoint["channel_values"] if item else {}
 
 
 def wait_for_input(task_id, *, kind="review", question="请核对供电证据并提交审核。", root=ROOT):
@@ -393,6 +486,8 @@ def resume_task(task_id, interrupt_id, answer, *, root=ROOT, on_event=None):
         raise HumanInputError("恢复答案不能为空。")
     with task_write(root / task_id):
         status = get_task_status(task_id, root=root)
+        if status["cancellation"]:
+            raise HumanInputError("等待事项已取消，不能恢复。")
         pending = status["pending"]
         if len(pending) != 1 or pending[0]["id"] != interrupt_id:
             raise HumanInputError("中断 ID 不匹配或已恢复，请重新查看 /status。")
@@ -409,7 +504,7 @@ def resume_task(task_id, interrupt_id, answer, *, root=ROOT, on_event=None):
         )
 
 
-def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None):
+def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None, recovery=None):
     """
     作用：执行图流程并校验和归档本次运行结果。
     输入：task_id - 任务 ID；message - 用户消息；root - 任务根目录；on_event - 可选事件回调。
@@ -452,6 +547,7 @@ def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None
         requirements,
         document,
         reviewed=(latest_review["decision"] == "approve" if latest_review else meta["reviewed"]),
+        cancelled=lambda: (task_dir / "cancel.json").exists(),
     )
 
     # 每次执行建立独立归档，保留历史运行记录。
@@ -467,10 +563,17 @@ def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None
         "status": "running",
         "started_at": datetime.now(UTC).isoformat(),
         "review_revision": latest_review["revision"] if latest_review else 0,
+        "recovered_from": recovery,
     }
     save_json(run_dir / "manifest.json", manifest)
     # 事件绑定本次 run，终端关闭后仍可查看工具执行记录。
-    events = RunEvents(task_id, run_id, run_dir / "events.jsonl", on_event)
+    events = RunEvents(
+        task_id,
+        run_id,
+        run_dir / "events.jsonl",
+        on_event,
+        cancelled=lambda: (task_dir / "cancel.json").exists(),
+    )
 
     try:
         events.emit("run_started")
@@ -563,6 +666,9 @@ def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None
 
             # 执行实际图流程，模型通过受约束的工具完成调查。
             agent.invoke(payload, config=config)
+            manifest["extract_attempts"] = session.extract_attempts
+            if (task_dir / "cancel.json").exists():
+                raise ValueError("当前运行已取消。")
 
             # 以最终保存状态恢复业务对象，避免只信任模型回复。
             saved = agent.get_state(config)
@@ -646,12 +752,15 @@ def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None
 
     # 记录执行失败类型并继续抛出，避免把错误当作器件不满足。
     except (Exception, KeyboardInterrupt) as exc:
-        manifest["status"] = "failed"
+        manifest["status"] = "cancelled" if (task_dir / "cancel.json").exists() else "failed"
         manifest["error_type"] = type(exc).__name__
         raise
 
     # 无论成功还是失败，都记录结束时间和最终清单。
     finally:
         manifest["finished_at"] = datetime.now(UTC).isoformat()
+        manifest.setdefault("extract_attempts", session.extract_attempts)
+        if manifest["status"] == "passed":
+            (task_dir / "cancel.json").unlink(missing_ok=True)
         events.emit("run_finished", status=manifest["status"])
         save_json(run_dir / "manifest.json", manifest)

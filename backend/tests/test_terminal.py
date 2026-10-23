@@ -110,6 +110,48 @@ def test_failed_tool_events(tmp_path):
     assert records[-1]["payload"]["reason"] == "ValueError"
 
 
+def test_cancelled_tool_does_not_start(tmp_path):
+    """
+    作用：取消标记存在时不进入下一个工具调用。
+    输入：tmp_path - 临时目录。
+    输出：无
+    """
+    calls = []
+    events = RunEvents("task-test", "run-test", tmp_path / "events.jsonl", cancelled=lambda: True)
+    request = SimpleNamespace(tool_call={"name": "read_file", "id": "call-1", "args": {}})
+    with pytest.raises(RuntimeError, match="取消"):
+        events.wrap_tool_call(request, lambda _: calls.append(1))
+    assert calls == []
+
+
+def test_cancel_and_retry_commands(tmp_path, monkeypatch):
+    """
+    作用：验证取消和失败恢复命令调用独立服务入口。
+    输入：tmp_path - 测试目录；monkeypatch - 依赖替换工具。
+    输出：无
+    """
+    calls, output = [], []
+    monkeypatch.setattr(terminal, "load_task", lambda *a, **k: {"task_id": "task-test"})
+    monkeypatch.setattr(
+        terminal, "cancel_task", lambda task_id, **kwargs: calls.append(("cancel", task_id))
+    )
+
+    def retry(task_id, **kwargs):
+        """
+        作用：记录恢复调用并返回固定报告。
+        输入：task_id - 任务 ID；kwargs - 服务参数。
+        输出：固定程序报告。
+        """
+        calls.append(("retry", task_id))
+        return {"report": {"constraint_result": {"status": "unknown", "reason": "待确认"}}}
+
+    monkeypatch.setattr(terminal, "retry_task", retry)
+    commands = iter(["/open task-test", "/cancel", "/retry", "/exit"])
+    terminal.run_terminal(root=tmp_path, read=lambda _: next(commands), write=output.append)
+    assert calls == [("cancel", "task-test"), ("retry", "task-test")]
+    assert any("结论：待确认" in item for item in output)
+
+
 def test_review_command(tmp_path, monkeypatch):
     """
     作用：审核命令只提交宿主服务，格式错误时不写入，也不触发模型。

@@ -78,7 +78,11 @@ def show_status(status, write=print):
     )
     result = records.get("constraint_result") or {}
     write("供电判定：" + RESULTS.get(result.get("status"), "尚未核验"))
-    if status.get("pending"):
+    if status.get("execution_status") == "cancelled":
+        write("下一步：查看 /status；如果无未完成节点，可用 /retry 恢复一次。")
+    elif status.get("execution_status") == "failed":
+        write("下一步：保留原运行记录；可用 /retry 尝试一次有边界的恢复。")
+    elif status.get("pending"):
         show_pending(status["pending"], write, status.get("reviews"))
     else:
         write("查看：/evidence 核对依据  ·  /report 查看判定  ·  /reviews 查看审核历史")

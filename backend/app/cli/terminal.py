@@ -7,10 +7,12 @@ from app.agents.human_input import HumanInputError
 from app.cli.display import show_evidence, show_pending, show_report, show_reviews, show_status
 from app.services.task_service import (
     ROOT,
+    cancel_task,
     create_task,
     get_task_status,
     load_task,
     resume_task,
+    retry_task,
     review_supply,
     send_message,
     wait_for_input,
@@ -23,6 +25,7 @@ HELP = """/new [电压]：创建任务，默认 3.3 V；可用 /new 3.3 | PDF路
 /reviews：查看审核历史；先查看 /status 和 /evidence 并对照 PDF 核对参数及条件
 /wait-review：暂停等待审核   /ask 问题：暂停等待澄清
 /resume 中断ID | 回答或审核请求ID：恢复当前等待事项
+/cancel：请求取消当前运行或等待   /retry：从可恢复的失败运行再试一次
 /raw：查看完整原始数据（排查问题时使用）
 /help：帮助   /exit：退出
 普通中文消息：发送给当前任务并执行。当前仅核验 ADS1115 供电。
@@ -111,6 +114,8 @@ def run_terminal(*, root: Path = ROOT, read=input, write=print):
                 "/wait-review",
                 "/ask",
                 "/resume",
+                "/cancel",
+                "/retry",
             }:
                 write("未知命令，请输入 /help。")
                 continue
@@ -171,6 +176,15 @@ def run_terminal(*, root: Path = ROOT, read=input, write=print):
                 result = resume_task(current, interrupt_id.strip(), answer.strip(), root=root)
                 show_report(result["report"], write)
                 write("恢复答复：" + str(result["reply"]))
+                continue
+            if command == "/cancel":
+                cancel_task(current, root=root)
+                write("已记录取消请求；当前操作会在下一工具边界或运行结束时停止。")
+                continue
+            if command == "/retry":
+                result = retry_task(current, root=root)
+                write("已从失败运行重新尝试，原运行记录保留。")
+                show_report(result["report"], write)
                 continue
 
             # 对话才进入实际执行，并分别展示模型解释与程序核验。

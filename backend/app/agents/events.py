@@ -16,15 +16,17 @@ class RunEvents(AgentMiddleware):
     输出：RunEvents 事件中间件对象。
     """
 
-    def __init__(self, task_id, run_id, path, on_event=None):
+    def __init__(self, task_id, run_id, path, on_event=None, cancelled=None):
         """
         作用：绑定当前运行的事件出口并初始化序号与锁。
-        输入：task_id - 任务 ID；run_id - 运行 ID；path - 事件文件；on_event - 可选回调。
+        输入：task_id - 任务 ID；run_id - 运行 ID；path - 事件文件；on_event - 可选回调；
+              cancelled - 可选取消检查函数。
         输出：无
         """
         # 每次运行从 1 编号；锁保证并行工具写入时不混行。
         self.task_id, self.run_id = task_id, run_id
         self.path, self.on_event = path, on_event
+        self.cancelled = cancelled or (lambda: False)
         self.sequence = 0
         self.lock = Lock()
 
@@ -62,6 +64,8 @@ class RunEvents(AgentMiddleware):
         """
         # 只展示名称、调用标识和文件位置，不记录完整工具参数。
         call = request.tool_call
+        if self.cancelled():
+            raise RuntimeError("当前运行已请求取消。")
         detail = dict(tool=call["name"], call_id=call["id"])
         path = call["args"].get("file_path")
         if isinstance(path, str):

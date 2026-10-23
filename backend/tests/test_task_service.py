@@ -13,6 +13,7 @@ from test_adc_tools import make_case
 from test_persistence import OfflineModel
 
 import app.agents.harness as harness
+import app.agents.tools as adc_tools
 import app.services.task_service as service
 from app.adc.extractors import extract_ads1115_supply
 from app.adc.rules import check_supply_voltage
@@ -298,6 +299,14 @@ print(json.dumps(result))
             },
         )
     assert len(service.get_task_status(task_id, root=root)["reviews"]) == 3
+    monkeypatch.setattr(service, "create_workbench_agent", harness.create_workbench_agent)
+    # 失败检查点已完成且业务快照存在，恢复操作只新增一次 run。
+    recovered = service.retry_task(task_id, root=root)
+    assert recovered["manifest"]["status"] == "passed"
+    assert recovered["manifest"]["recovered_from"]
+    assert recovered["report"] == confirmed["report"]
+    with pytest.raises(ValueError, match="仅支持"):
+        service.retry_task(task_id, root=root)
 
 
 def test_invalid_task_id(tmp_path):
@@ -309,3 +318,106 @@ def test_invalid_task_id(tmp_path):
     # 验证应用服务自身拒绝路径穿越，不依赖命令行保护。
     with pytest.raises(ValueError):
         service.load_task("../outside", root=tmp_path)
+
+
+def test_failed_supply_tool_recovers_once(tmp_path, monkeypatch):
+    """
+    作用：验证提取工具失败后在完整检查点上恢复，业务结果只形成一次。
+    输入：tmp_path - 测试目录；monkeypatch - 依赖替换工具。
+    输出：无
+    """
+    _, document, _, _ = make_case()
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"synthetic document fixture")
+    document = replace(
+        document, directory=tmp_path, sha256=hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    monkeypatch.setattr(service, "register_pdf", lambda *args: document)
+    monkeypatch.setattr(harness, "load_settings", lambda: None)
+    root = tmp_path / "tasks"
+    meta = service.create_task(root=root)
+    task_id = meta["task_id"]
+    evidence, fact = extract_ads1115_supply(document)
+    result = check_supply_voltage(
+        AdcRequirements.model_validate(meta["requirements"]), fact, evidence, document
+    )
+    report = {
+        "task_id": task_id,
+        "scope": "supply_voltage_only",
+        "constraint_result": result.model_dump(mode="json"),
+    }
+
+    # 首轮固定模型遇到工具返回的可控失败，图正常结束但业务验收失败。
+    original_extract = adc_tools.extract_with_bounds
+    monkeypatch.setattr(
+        adc_tools, "extract_with_bounds", lambda *a, **k: (None, None, 2, "可控临时失败")
+    )
+    first_calls = [
+        ("write_todos", {"todos": [{"content": "verify", "status": "completed"}]}),
+        ("read_adc_supply_evidence", {"document_id": document.id, "part_number": "ADS1115"}),
+    ]
+    responses = [
+        AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"f-{index}"}])
+        for index, (name, args) in enumerate(first_calls)
+    ] + [AIMessage(content="wait")]
+    monkeypatch.setattr(harness, "create_chat_model", lambda _: OfflineModel(responses=responses))
+    with pytest.raises(ValueError, match="没有持久化业务判定"):
+        service.send_message(task_id, root=root)
+    assert service.get_task_status(task_id, root=root)["execution_status"] == "failed"
+
+    # 下一次重建工具，读取同一绑定资料并完成程序规则和报告。
+    monkeypatch.setattr(adc_tools, "extract_with_bounds", original_extract)
+    retry_calls = [
+        ("read_adc_supply_evidence", {"document_id": document.id, "part_number": "ADS1115"}),
+        ("check_adc_supply", {"fact_id": fact.id, "evidence_id": evidence.id}),
+        ("write_file", {"file_path": "/outputs/report.json", "content": json.dumps(report)}),
+    ]
+    responses = [
+        AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"r-{index}"}])
+        for index, (name, args) in enumerate(retry_calls)
+    ] + [AIMessage(content="done")]
+    monkeypatch.setattr(harness, "create_chat_model", lambda _: OfflineModel(responses=responses))
+    recovered = service.retry_task(task_id, root=root)
+    assert recovered["report"] == report
+    assert recovered["manifest"]["status"] == "passed"
+    assert recovered["manifest"]["extract_attempts"] == 1
+    runs = sorted((root / task_id / "runs").glob("*/manifest.json"))
+    assert len(runs) == 2
+    assert {json.loads(path.read_text(encoding="utf-8"))["status"] for path in runs} == {
+        "failed",
+        "passed",
+    }
+
+
+def test_cancel_request_is_persistent_and_idempotent(tmp_path, monkeypatch):
+    """
+    作用：验证取消请求持久化、重放复用及不可恢复边界。
+    输入：tmp_path - 测试目录；monkeypatch - 依赖替换工具。
+    输出：无
+    """
+    _, document, _, _ = make_case()
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"synthetic document fixture")
+    document = replace(
+        document, directory=tmp_path, sha256=hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    monkeypatch.setattr(service, "register_pdf", lambda *args: document)
+    root = tmp_path / "tasks"
+    task_id = service.create_task(root=root)["task_id"]
+    run_dir = root / task_id / "runs" / "run-test"
+    run_dir.mkdir(parents=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "running",
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "run_id": "run-test",
+            }
+        ),
+        encoding="utf-8",
+    )
+    first = service.cancel_task(task_id, root=root)
+    assert service.cancel_task(task_id, root=root) == first
+    assert service.get_task_status(task_id, root=root)["execution_status"] == "cancelled"
+    with pytest.raises(ValueError, match="完整检查点"):
+        service.retry_task(task_id, root=root)

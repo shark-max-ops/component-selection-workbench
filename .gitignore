@@ -18,6 +18,11 @@ dist/
 # 本地手册、数据库、解析结果与任务输出
 /runtime/
 
+# 本地资料原件、解析产物和资料库；目录骨架由 .gitkeep 保留
+/library/originals/*/
+/library/extracted/*/
+/library/catalog.sqlite*
+
 # 本地编辑器配置
 .vscode/
 

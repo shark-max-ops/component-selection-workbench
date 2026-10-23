@@ -18,6 +18,8 @@ uv run python -m scripts.run_terminal
 
 完成首次核验后，先 `/status` 查看参数与 `review_revision`，再 `/evidence` 并对照原 PDF 核对范围、单位和适用条件。人工确认可用 `/review review-001 | 0 | 姓名 | approve | 已核对推荐供电范围及条件`；撤回用新的请求 ID、当前版本和 `reject`。审核立即运行程序规则，不调用模型；`/reviews` 查看版本历史。审核人姓名由操作者声明，当前没有身份认证。详见 [A3 人工审核](docs/A3人工审核.md)。
 
+B1 已在根目录建立 `library/` 资料库：5 份真实手册/应用笔记、3 张器件简介、逐页状态、MarkItDown 对照以及旧任务只读元信息索引。正式证据仍以可定位页码的 PyMuPDF 文本和原 PDF 为准。操作及边界见 [B1 资料库](docs/B1资料库.md)。A 阶段任务仍使用原 `runtime/` 资料。
+
 ## 目录与阅读顺序
 
 完成核验后可用 `/wait-review` 暂停等待审核，或 `/ask 问题` 暂停等待澄清。`/status` 显示真实中断 ID；审核等待需先 `/review`，再 `/resume 中断ID | 审核请求ID`；澄清等待用 `/resume 中断ID | 回答`。普通消息不能恢复，暂停后可以退出进程再打开原任务。恢复后会继续调用模型。详见 [A3.2 暂停与恢复](docs/A3暂停与恢复.md)。
@@ -42,15 +44,18 @@ backend/
       messages.py          工具消息读取统计
     infrastructure/
       documents.py         PDF 登记、哈希归档、逐页文本
+      library.py           B1 资料库、版本登记和逐页状态
       llm.py               模型连接
       json_store.py        JSON 文件保存
   scripts/
     run_terminal.py        日常终端入口
+    library.py             B1 资料导入和查询入口
     run_persistent_adc.py  持久化命令行入口
     demos/                 早期开发演示实现
   skills/                  Agent 工作规范
   tests/                   契约、业务、权限、持久化与终端验证
 docs/                      使用说明、架构、阶段记录
+library/                   B1 原件、解析产物、cards/*.md 器件简介和目录数据库
 runtime/                   原始资料、解析文本、数据库、任务与运行归档
 ```
 

@@ -182,6 +182,99 @@ def test_create_query_and_continue(tmp_path, monkeypatch, voltage, approved_stat
         with pytest.raises(ValueError, match="审核需要"):
             service.review_supply(task_id, root=root, **{**approval, **changes})
 
+    # 在原线程暂停，普通消息和错误恢复不得改变等待点。
+    waiting = service.wait_for_input(task_id, root=root)
+    pending_id = waiting["pending"][0]["id"]
+    assert waiting["manifest"]["status"] == "waiting_input"
+    assert service.get_task_status(task_id, root=root)["execution_status"] == "waiting_input"
+    with pytest.raises(ValueError, match="普通消息不能恢复"):
+        service.send_message(task_id, "同意", root=root)
+    with pytest.raises(ValueError, match="中断 ID"):
+        service.resume_task(task_id, "wrong", "同意", root=root)
+    with pytest.raises(ValueError, match="先提交"):
+        service.resume_task(task_id, pending_id, "同意", root=root)
+    with pytest.raises(ValueError):
+        service.resume_task(other["task_id"], pending_id, "同意", root=root)
+    confirmed = service.review_supply(
+        task_id,
+        root=root,
+        **{
+            **approval,
+            "request_id": "review-3",
+            "expected_revision": 2,
+        },
+    )
+    assert service.get_task_status(task_id, root=root)["pending"][0]["id"] == pending_id
+
+    # 用 uv 启动独立进程，重建模型及业务对象后恢复同一检查点。
+    worker = """
+import json, sys
+from pathlib import Path
+from dataclasses import replace
+sys.path.insert(0, "tests")
+from test_adc_tools import make_case
+from test_persistence import OfflineModel
+from langchain_core.messages import AIMessage
+import app.services.task_service as service
+import app.agents.harness as harness
+task_id, root, pending_id = sys.argv[1:]
+root = Path(root)
+meta = service.load_task(task_id, root=root)
+_, document, _, _ = make_case()
+document = replace(document, directory=Path(meta["source_pdf"]).parent,
+                   sha256=meta["document_sha256"])
+service.register_pdf = lambda *args: document
+harness.load_settings = lambda: None
+harness.create_chat_model = lambda _: OfflineModel(responses=[AIMessage(content="resumed")])
+result = service.resume_task(task_id, pending_id, "review-3", root=root)
+print(json.dumps(result))
+"""
+    completed = subprocess.run(
+        [
+            "uv",
+            "--cache-dir",
+            "../runtime/uv-cache",
+            "run",
+            "--offline",
+            "--no-sync",
+            "python",
+            "-B",
+            "-c",
+            worker,
+            task_id,
+            str(root),
+            pending_id,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        timeout=60,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    resumed = json.loads(completed.stdout)
+    assert resumed["manifest"]["thread_id"] == task_id
+    assert resumed["report"] == confirmed["report"]
+    assert service.get_task_status(task_id, root=root)["pending"] == []
+    with pytest.raises(ValueError, match="中断 ID"):
+        service.resume_task(task_id, pending_id, "review-3", root=root)
+
+    # 澄清使用独立等待事项，只记录答案，不更改固定需求。
+    clarification = service.wait_for_input(
+        task_id,
+        root=root,
+        kind="clarification",
+        question="是否只解释供电结果？",
+    )
+    clarified = service.resume_task(
+        task_id,
+        clarification["pending"][0]["id"],
+        "是",
+        root=root,
+    )
+    assert clarified["report"] == confirmed["report"]
+    assert service.load_task(task_id, root=root) == meta
+
     # 即使历史上成功，最近一次执行失败后也不能用旧产物接受新审核。
     def fail_agent(**kwargs):
         """
@@ -201,10 +294,10 @@ def test_create_query_and_continue(tmp_path, monkeypatch, voltage, approved_stat
             **{
                 **approval,
                 "request_id": "after-failure",
-                "expected_revision": 2,
+                "expected_revision": 3,
             },
         )
-    assert len(service.get_task_status(task_id, root=root)["reviews"]) == 2
+    assert len(service.get_task_status(task_id, root=root)["reviews"]) == 3
 
 
 def test_invalid_task_id(tmp_path):

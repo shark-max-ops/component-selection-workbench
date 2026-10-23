@@ -7,6 +7,41 @@ import pytest
 
 import app.cli.terminal as terminal
 from app.agents.events import RunEvents
+from app.cli.display import show_report
+
+
+@pytest.mark.parametrize(
+    "status,label",
+    [
+        ("satisfied", "满足"),
+        ("not_satisfied", "不满足"),
+        ("unknown", "待确认"),
+        ("conflict", "证据冲突"),
+    ],
+)
+def test_report_summary_preserves_verdict(status, label):
+    """
+    作用：验证摘要保留真实结论和未解决项，隐藏内部引用。
+    输入：status - 原始判定；label - 中文判定。
+    输出：无
+    """
+    output = []
+    show_report(
+        {
+            "constraint_result": {
+                "status": status,
+                "reason": "核验原因",
+                "unresolved": ["待核对条件"],
+                "fact_ids": ["internal-fact-id"],
+                "evidence_ids": ["internal-evidence-id"],
+            }
+        },
+        output.append,
+    )
+    text = "\n".join(output)
+    assert f"结论：{label}" in text
+    assert "核验原因" in text and "待核对条件" in text
+    assert "internal-" not in text
 
 
 def test_terminal_commands(tmp_path, monkeypatch):
@@ -121,3 +156,54 @@ def test_review_command(tmp_path, monkeypatch):
         )
     ]
     assert any("本次未调用模型" in line for line in output)
+
+
+def test_wait_and_resume_commands(tmp_path, monkeypatch):
+    """
+    作用：验证等待与恢复命令独立于普通消息分发。
+    输入：tmp_path - 临时目录；monkeypatch - 依赖替换工具。
+    输出：无
+    """
+    calls, output = [], []
+    monkeypatch.setattr(terminal, "load_task", lambda *a, **k: {"task_id": "task-test"})
+
+    def wait(task_id, **kwargs):
+        """
+        作用：记录等待命令参数。
+        输入：task_id - 任务 ID；kwargs - 等待参数。
+        输出：合成等待事项。
+        """
+        calls.append(("wait", task_id, kwargs))
+        return {"pending": [{"id": "pending-test"}]}
+
+    def resume(task_id, interrupt_id, answer, **kwargs):
+        """
+        作用：记录明确恢复操作的参数。
+        输入：task_id - 任务 ID；interrupt_id - 中断 ID；answer - 答案；kwargs - 服务参数。
+        输出：合成运行结果。
+        """
+        calls.append(("resume", task_id, interrupt_id, answer))
+        return {"report": {}, "reply": "已恢复"}
+
+    monkeypatch.setattr(terminal, "wait_for_input", wait)
+    monkeypatch.setattr(terminal, "resume_task", resume)
+    commands = iter(
+        [
+            "/open task-test",
+            "/wait-review",
+            "/resume bad",
+            "/resume pending-test | review-1",
+            "/ask 需要说明什么？",
+            "/exit",
+        ]
+    )
+    terminal.run_terminal(root=tmp_path, read=lambda _: next(commands), write=output.append)
+    assert calls == [
+        ("wait", "task-test", {"root": tmp_path}),
+        ("resume", "task-test", "pending-test", "review-1"),
+        (
+            "wait",
+            "task-test",
+            {"root": tmp_path, "kind": "clarification", "question": "需要说明什么？"},
+        ),
+    ]

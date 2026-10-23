@@ -11,13 +11,14 @@ from uuid import uuid4
 from deepagents.backends.utils import create_file_data, file_data_to_string
 from langchain_core.messages import messages_to_dict
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.types import Overwrite
+from langgraph.types import Command, Overwrite
 
 from app.adc.constants import SKILL_PATH, SOURCE_URL
 from app.adc.extractors import extract_ads1115_supply
 from app.adc.rules import check_supply_voltage
 from app.agents.events import RunEvents
 from app.agents.harness import create_workbench_agent
+from app.agents.human_input import AwaitHumanInput, HumanInputError, pending_interrupts
 from app.agents.messages import successful_reads
 from app.agents.state_sync import PersistAdcRecords, restore_session, snapshot_session
 from app.agents.tools import build_adc_tools
@@ -170,6 +171,13 @@ def get_task_status(task_id: str, *, root: Path = ROOT) -> dict:
     # 整理查询结果，保留原有返回字段。
     values = checkpoint.checkpoint["channel_values"] if checkpoint else {}
     reviews = read_reviews(task_dir)
+    pending = pending_interrupts(checkpoint)
+    # 运行失败与器件判定分开；真实中断优先显示为等待输入。
+    runs = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (task_dir / "runs").glob("*/manifest.json")
+    ]
+    latest_run = max(runs, key=lambda item: item["started_at"], default={})
     return {
         "task_id": meta["task_id"],
         "thread_id": meta["thread_id"],
@@ -178,6 +186,19 @@ def get_task_status(task_id: str, *, root: Path = ROOT) -> dict:
         "adc_records": reviews[-1]["records"] if reviews else values.get("adc_records", {}),
         "review_revision": reviews[-1]["revision"] if reviews else 0,
         "reviews": reviews,
+        "pending": pending,
+        "execution_status": "waiting_input"
+        if pending
+        else (
+            latest_run["status"]
+            if latest_run.get("status") in {"running", "failed"}
+            else "unfinished"
+            if any(k.startswith("branch:to:") and v for k, v in values.items())
+            else "completed"
+            if checkpoint
+            else "created"
+        ),
+        "human_response": values.get("human_response"),
     }
 
 
@@ -240,7 +261,7 @@ def review_supply(
             saver.is_setup = True
             checkpoint = saver.get_tuple({"configurable": {"thread_id": task_id}})
             # 完成的图在检查点中没有待执行的分支。
-            if any(
+            if not status["pending"] and any(
                 key.startswith("branch:to:") and value
                 for key, value in checkpoint.checkpoint["channel_values"].items()
             ):
@@ -250,7 +271,11 @@ def review_supply(
             for path in (task_dir / "runs").glob("*/manifest.json")
         ]
         latest_run = max(runs, key=lambda item: item["started_at"], default={})
-        if latest_run.get("status") != "passed":
+        if latest_run.get("status") != "passed" and not (
+            latest_run.get("status") == "waiting_input"
+            and status["pending"]
+            and status["pending"][0]["value"]["kind"] == "review"
+        ):
             raise ValueError("最新运行尚未通过验收，不能审核。")
         # 重新校验绑定原件和提取结果，避免审核与当前证据脱节。
         source = Path(meta["source_pdf"])
@@ -314,14 +339,82 @@ def send_message(
     """
     load_task(task_id, root=root)
     with task_write(root / task_id):
+        if get_task_status(task_id, root=root)["pending"]:
+            raise HumanInputError("任务正在等待输入，请使用 /resume；普通消息不能恢复。")
         return _send_message(task_id, message, root=root, on_event=on_event)
 
 
-def _send_message(task_id, message, *, root, on_event):
+def wait_for_input(task_id, *, kind="review", question="请核对供电证据并提交审核。", root=ROOT):
+    """
+    作用：在已完成核验的同一线程开启人工等待点。
+    输入：task_id - 任务 ID；kind - review 或 clarification；question - 等待问题；root - 根目录。
+    输出：包含真实中断 ID 的等待运行结果。
+    """
+    load_task(task_id, root=root)
+    if (
+        kind not in {"review", "clarification"}
+        or not isinstance(question, str)
+        or not question.strip()
+    ):
+        raise HumanInputError("等待类型或问题无效。")
+    with task_write(root / task_id):
+        status = get_task_status(task_id, root=root)
+        if status["pending"] or not status["adc_records"].get("constraint_result"):
+            raise HumanInputError("请先完成核验，且不能重复开启等待事项。")
+        # 只在已验收运行后设置等待点，不把失败任务包装成可恢复暂停。
+        runs = [
+            json.loads(p.read_text(encoding="utf-8"))
+            for p in (root / task_id / "runs").glob("*/manifest.json")
+        ]
+        if max(runs, key=lambda item: item["started_at"], default={}).get("status") != "passed":
+            raise HumanInputError("最新运行尚未通过验收，不能开启等待。")
+        return _send_message(
+            task_id,
+            question,
+            root=root,
+            on_event=None,
+            waiting={
+                "kind": kind,
+                "question": question,
+                "review_revision": status["review_revision"],
+            },
+        )
+
+
+def resume_task(task_id, interrupt_id, answer, *, root=ROOT, on_event=None):
+    """
+    作用：校验等待事项后，以 Command 在原线程恢复。
+    输入：task_id - 任务 ID；interrupt_id - 中断 ID；answer - 回答或审核请求 ID；root - 根目录。
+          on_event - 可选事件回调。
+    输出：恢复后的运行结果。
+    """
+    load_task(task_id, root=root)
+    if not isinstance(answer, str) or not answer.strip():
+        raise HumanInputError("恢复答案不能为空。")
+    with task_write(root / task_id):
+        status = get_task_status(task_id, root=root)
+        pending = status["pending"]
+        if len(pending) != 1 or pending[0]["id"] != interrupt_id:
+            raise HumanInputError("中断 ID 不匹配或已恢复，请重新查看 /status。")
+        if pending[0]["value"]["kind"] == "review":
+            latest = status["reviews"][-1] if status["reviews"] else None
+            if (
+                not latest
+                or latest["request_id"] != answer
+                or latest["revision"] <= pending[0]["value"]["review_revision"]
+            ):
+                raise HumanInputError("请先提交本次 /review，再使用其请求 ID 恢复。")
+        return _send_message(
+            task_id, "", root=root, on_event=on_event, resume={interrupt_id: answer}
+        )
+
+
+def _send_message(task_id, message, *, root, on_event, waiting=None, resume=None):
     """
     作用：执行图流程并校验和归档本次运行结果。
     输入：task_id - 任务 ID；message - 用户消息；root - 任务根目录；on_event - 可选事件回调。
-    输出：dict，包含 manifest、report 和 reply 的运行结果。
+          waiting - 可选等待事项；resume - 可选中断 ID 与答案映射。
+    输出：dict，包含运行清单、报告及答复；暂停时附带 pending 且报告为空。
     """
     meta = load_task(task_id, root=root)
     reviews = read_reviews(root / task_id)
@@ -387,7 +480,7 @@ def _send_message(task_id, message, *, root, on_event):
                 tools=tools,
                 skills=["/skills/"],
                 checkpointer=saver,
-                middleware=[events, PersistAdcRecords(session)],
+                middleware=[events, AwaitHumanInput(), PersistAdcRecords(session)],
                 system_prompt=(
                     "你是器件核验工作台 Agent，"
                     "使用 ADC Skill 完成供电单项核验。"
@@ -402,7 +495,7 @@ def _send_message(task_id, message, *, root, on_event):
             if not first_run:
                 if not previous.values:
                     raise ValueError("找不到该任务的检查点，不能作为已完成任务续接。")
-                if previous.next:
+                if previous.next and resume is None:
                     raise ValueError("任务存在未完成节点；本轮暂不自动恢复，请保留该任务。")
 
                 # 恢复业务对象；续聊只追加消息，不重新注入输入文件。
@@ -453,6 +546,14 @@ def _send_message(task_id, message, *, root, on_event):
                     + message
                 )
 
+            if waiting:
+                payload["human_request"] = waiting
+            if resume is not None:
+                # 恢复使用 Command，不追加普通用户消息；保留宿主审核同步更新。
+                payload.pop("messages", None)
+                payload = Command(resume=resume, update=payload)
+                manifest["resumed_interrupt_ids"] = list(resume)
+
             # 记住受保护输入，执行结束后检查是否被改写。
             protected = {
                 path: file_data_to_string(data)
@@ -467,6 +568,17 @@ def _send_message(task_id, message, *, root, on_event):
             saved = agent.get_state(config)
             state = saved.values
             restore_session(state, session)
+
+            if saved.interrupts:
+                manifest["status"] = "waiting_input"
+                pending = [{"id": item.id, "value": item.value} for item in saved.interrupts]
+                save_json(run_dir / "pending.json", pending)
+                return {
+                    "manifest": manifest,
+                    "pending": pending,
+                    "report": None,
+                    "reply": "任务已暂停，请查看等待事项并使用 /resume。",
+                }
 
             save_json(
                 run_dir / "messages.json",

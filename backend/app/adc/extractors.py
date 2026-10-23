@@ -11,11 +11,11 @@ def extract_ads1115_supply(
     document: RegisteredDocument,
 ) -> tuple[Evidence, ParameterFact]:
     """
-    作用：提取指定手册推荐工作条件中的 ADS1115 供电范围。
-    输入：本次从 PDF 提取出的文档对象。
-    输出：真实原文证据，以及默认未人工审核的参数声明。
-    边界：只支持 SBAS444E；版本、表头或行格式不匹配就停止。
+    作用：提取 ADS1115 推荐供电范围及原文证据。
+    输入：document - 已登记的文档对象。
+    输出：tuple[Evidence, ParameterFact]，原文证据与默认未审核的参数声明。
     """
+    # 只支持 SBAS444E；版本、表头或行格式不匹配就停止。
     if document.version != "SBAS444E" or "ADS1115" not in document.pages[0]:
         raise ValueError("当前提取器只支持含 ADS1115 的 SBAS444E 手册。")
 

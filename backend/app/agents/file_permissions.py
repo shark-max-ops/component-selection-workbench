@@ -5,11 +5,11 @@ from deepagents import FilesystemPermission
 
 def build_file_permissions() -> list[FilesystemPermission]:
     """
-    作用：构造有序文件权限。
-    输入：无。
-    输出：本次 Agent 使用的新规则列表。
-    要点：具体允许在前，全局拒绝在后；只控制内置文件工具。
+    作用：构造虚拟文件读写权限规则。
+    输入：无
+    输出：list[FilesystemPermission]，按匹配顺序排列的权限规则。
     """
+    # 具体允许在前，全局拒绝在后；只控制内置文件工具。
     return [
         FilesystemPermission(
             operations=["read"],

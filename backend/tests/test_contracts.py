@@ -13,12 +13,13 @@ from app.contracts import (
 
 
 def make_requirements(**changes) -> AdcRequirements:
-    """构造合成需求。
-
-    输入：需要覆盖的字段。
-    输出：经过验证的需求对象。
-    要点：TEST_ADC 是测试名称，不对应真实器件规格。
     """
+    作用：构造供契约测试使用的合成需求。
+    输入：changes - 待覆盖的需求字段。
+    输出：AdcRequirements，校验通过的需求对象。
+    """
+    # TEST_ADC 是测试名称，不对应真实器件规格。
+    # 用最小合法需求作为基线，允许调用方覆盖待测字段。
     data = {
         "id": "req-test",
         "candidate_parts": ["TEST_ADC"],
@@ -31,13 +32,18 @@ def make_requirements(**changes) -> AdcRequirements:
 
 
 def test_missing_conditions_stay_unknown():
-    """缺失条件保持未知，JSON 序列化前后含义保持一致。"""
+    """
+    作用：缺失条件保持未知，JSON 序列化前后含义保持一致。
+    输入：无
+    输出：无
+    """
     item = make_requirements()
 
     assert item.simultaneous_sampling is None
     assert item.input_mode is None
     assert item.min_samples_per_channel_sps is None
 
+    # 往返 JSON 后，未明确的条件仍需保持未知。
     restored = AdcRequirements.model_validate_json(item.model_dump_json())
     assert restored == item
 
@@ -53,13 +59,21 @@ def test_missing_conditions_stay_unknown():
     ],
 )
 def test_bad_requirements_rejected(changes):
-    """拒绝布尔通道数、倒置范围、非有限值、重复候选和未知字段。"""
+    """
+    作用：拒绝布尔通道数、倒置范围、非有限值、重复候选和未知字段。
+    输入：changes - 非法需求字段组合。
+    输出：无
+    """
     with pytest.raises(ValidationError):
         make_requirements(**changes)
 
 
 def test_wrong_parameter_unit_rejected():
-    """供电参数不能使用采样率单位。"""
+    """
+    作用：供电参数不能使用采样率单位。
+    输入：无
+    输出：无
+    """
     with pytest.raises(ValidationError):
         ParameterFact(
             id="fact-test",
@@ -72,7 +86,11 @@ def test_wrong_parameter_unit_rejected():
 
 
 def test_pdf_page_zero_rejected():
-    """证据页序从 1 开始，避免与解析器的零起始索引混用。"""
+    """
+    作用：证据页序从 1 开始，避免与解析器的零起始索引混用。
+    输入：无
+    输出：无
+    """
     with pytest.raises(ValidationError):
         Evidence(
             id="ev-test",
@@ -90,7 +108,11 @@ def test_pdf_page_zero_rejected():
     ["satisfied", "not_satisfied", "conflict"],
 )
 def test_decisions_need_references(status):
-    """明确判定缺少依据时必须报错。"""
+    """
+    作用：明确判定缺少依据时必须报错。
+    输入：status - 待测或期望的判定状态。
+    输出：无
+    """
     with pytest.raises(ValidationError):
         ConstraintResult(
             id="result-test",
@@ -103,7 +125,11 @@ def test_decisions_need_references(status):
 
 
 def test_unknown_requires_explanation():
-    """待确认必须指出缺失信息。"""
+    """
+    作用：待确认必须指出缺失信息。
+    输入：无
+    输出：无
+    """
     with pytest.raises(ValidationError):
         ConstraintResult(
             id="result-test",

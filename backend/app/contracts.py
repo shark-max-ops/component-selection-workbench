@@ -38,12 +38,12 @@ ParameterName = Literal[
 
 
 def unique_ids(values: list[str]) -> list[str]:
-    """检查引用列表。
-
-    输入：已经清理过的 ID 列表。
-    输出：没有重复引用的原列表。
-    边界：重复引用直接报错，避免静默修改调用方的数据。
     """
+    作用：检查引用列表是否存在重复 ID。
+    输入：values - 已清理的引用 ID 列表。
+    输出：list[str]，通过检查的原列表。
+    """
+    # 重复引用直接报错，避免静默修改调用方的数据。
     if len(values) != len(set(values)):
         raise ValueError("引用 ID 不能重复")
     return values
@@ -53,7 +53,11 @@ IdList = Annotated[list[Text], AfterValidator(unique_ids)]
 
 
 class Contract(BaseModel):
-    """公共配置：禁止未知字段、拒绝非有限数值、字段赋值时重新校验。"""
+    """
+    作用：统一数据契约的字段校验配置。
+    输入：子类声明的字段。
+    输出：禁止未知字段并在赋值时校验的契约对象。
+    """
 
     model_config = ConfigDict(
         extra="forbid",
@@ -63,7 +67,11 @@ class Contract(BaseModel):
 
 
 class AdcRequirements(Contract):
-    """保存需求快照；None 表示未明确，不能推断为没有限制或已经满足。"""
+    """
+    作用：保存 ADC 选型需求快照。
+    输入：需求 ID；候选型号；供电、接口、通道、分辨率及可选约束。
+    输出：AdcRequirements 需求对象。
+    """
 
     id: Text
     candidate_parts: Annotated[IdList, Field(min_length=1)]
@@ -86,12 +94,12 @@ class AdcRequirements(Contract):
 
     @model_validator(mode="after")
     def check_input_range(self) -> Self:
-        """检查需求中的输入范围。
-
-        输入：当前需求对象。
-        输出：检查通过的自身。
-        边界：允许只知道一侧；两侧已知时，下限不能超过上限。
         """
+        作用：校验需求中的输入电压范围。
+        输入：self - 当前需求对象。
+        输出：Self，通过检查的当前对象。
+        """
+        # 允许只知道一侧；两侧已知时，下限不能超过上限。
         if (
             self.input_min_v is not None
             and self.input_max_v is not None
@@ -102,7 +110,11 @@ class AdcRequirements(Contract):
 
 
 class Evidence(Contract):
-    """保存原文及文档版本定位；PDF 页序从 1 开始。"""
+    """
+    作用：保存原文证据及文档版本定位。
+    输入：证据 ID；文档 ID、版本及哈希；来源网址；页码；章节及原文。
+    输出：Evidence 证据对象。
+    """
 
     id: Text
     document_id: Text
@@ -115,6 +127,7 @@ class Evidence(Contract):
     ]
     source_url: HttpUrl
 
+    # PDF 页序从 1 开始，与解析器的零起始页索引区分。
     pdf_page: PositiveInt
     printed_page: Text | None = None
     section: Text | None = None
@@ -122,7 +135,11 @@ class Evidence(Contract):
 
 
 class NumericValue(Contract):
-    """保存数值界限；两侧相等表示单值，None 表示该侧未给出。"""
+    """
+    作用：保存带单位的数值上下限。
+    输入：kind - 数值类型标记；lower - 下限；upper - 上限；unit - 单位。
+    输出：NumericValue 数值对象。
+    """
 
     kind: Literal["numeric"] = "numeric"
     lower: Decimal | None = None
@@ -131,12 +148,12 @@ class NumericValue(Contract):
 
     @model_validator(mode="after")
     def check_bounds(self) -> Self:
-        """检查参数上下限。
-
-        输入：当前数值对象。
-        输出：检查通过的自身。
-        边界：至少提供一侧；缺失一侧不能被当作无限范围。
         """
+        作用：校验数值上下限是否完整且有序。
+        输入：self - 当前数值对象。
+        输出：Self，通过检查的当前对象。
+        """
+        # 至少提供一侧；缺失一侧不能被当作无限范围。
         if self.lower is None and self.upper is None:
             raise ValueError("至少提供一个数值界限")
 
@@ -147,14 +164,22 @@ class NumericValue(Contract):
 
 
 class TextValue(Contract):
-    """保存枚举参数；当前用于规范化后的接口名称。"""
+    """
+    作用：保存规范化的接口枚举值。
+    输入：kind - 文本类型标记；value - I2C 或 SPI。
+    输出：TextValue 接口对象。
+    """
 
     kind: Literal["text"] = "text"
     value: Literal["I2C", "SPI"]
 
 
 class ParameterFact(Contract):
-    """保存参数声明及适用条件；提取出的声明不等于已经审核的事实。"""
+    """
+    作用：保存参数声明、适用条件与证据引用。
+    输入：参数 ID；型号；参数类别及数值；规格类别；条件；证据 ID；审核状态。
+    输出：ParameterFact 参数声明对象。
+    """
 
     id: Text
     part_number: Text
@@ -192,12 +217,13 @@ class ParameterFact(Contract):
 
     @model_validator(mode="after")
     def check_parameter_type(self) -> Self:
-        """检查参数类型、单位和基本数值。
-
-        输入：当前参数声明。
-        输出：检查通过的自身。
-        边界：不判断原文真假、证据适用性或该参数是否满足用户需求。
         """
+        作用：校验参数类型、单位及适用字段。
+        输入：self - 当前参数声明。
+        输出：Self，通过检查的当前对象。
+        """
+        # 不判断原文真假、证据适用性或该参数是否满足用户需求。
+        # 接口只接受枚举文本，其他参数按类别检查数值单位。
         if self.parameter == "interface":
             if not isinstance(self.value, TextValue):
                 raise ValueError("接口参数必须使用 text 类型")
@@ -215,6 +241,7 @@ class ParameterFact(Contract):
             ):
                 raise ValueError("数值参数类型或单位不匹配")
 
+            # 检查数值为正，位数和通道数还必须为整数。
             bounds = (self.value.lower, self.value.upper)
 
             if any(bound is not None and bound <= 0 for bound in bounds):
@@ -226,6 +253,7 @@ class ParameterFact(Contract):
                 ):
                     raise ValueError("分辨率位数与通道数必须为整数")
 
+        # 采样口径和活跃通道数仅能附在采样率参数上。
         if self.parameter != "sample_rate" and (
             self.sampling_scope != "unknown" or self.active_channels is not None
         ):
@@ -235,7 +263,11 @@ class ParameterFact(Contract):
 
 
 class ConstraintResult(Contract):
-    """保存某候选的一项判定；跨对象引用由后续核验服务检查。"""
+    """
+    作用：保存候选器件的单项核验结果。
+    输入：结果 ID；需求 ID；型号；参数；判定、原因、引用及未解决项。
+    输出：ConstraintResult 判定对象。
+    """
 
     id: Text
     requirement_id: Text
@@ -256,15 +288,17 @@ class ConstraintResult(Contract):
 
     @model_validator(mode="after")
     def check_support(self) -> Self:
-        """检查判定是否附带必要依据。
-
-        输入：当前判定对象。
-        输出：检查通过的自身。
-        边界：这里只检查引用数量和缺失说明，不保证引用内容正确。
         """
+        作用：检查判定是否附有必要引用和缺失说明。
+        输入：self - 当前判定对象。
+        输出：Self，通过检查的当前对象。
+        """
+        # 这里只检查引用数量和缺失说明，不保证引用内容正确。
+        # 明确判定与冲突判定必须具备事实和证据引用。
         if self.status != "unknown" and (not self.fact_ids or not self.evidence_ids):
             raise ValueError("明确判定和冲突判定必须引用参数声明与原文证据")
 
+        # 待确认需解释缺失项，冲突需引用至少两条参数声明。
         if self.status == "unknown" and not self.unresolved:
             raise ValueError("待确认必须说明未解决的问题")
 

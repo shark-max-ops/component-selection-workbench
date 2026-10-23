@@ -9,9 +9,9 @@ from app.services.task_service import create_task, get_task_status, load_task, s
 
 def main() -> None:
     """
-    作用：创建、查看或续接任务。
-    输入：命令行参数；由 argparse 读取。
-    输出：无返回值；打印结果并按所选操作保存运行产物。
+    作用：通过命令行创建、查看或续聊持久化任务。
+    输入：无
+    输出：无
     """
     # 定义命令行输入，业务处理交给应用服务。
     parser = argparse.ArgumentParser(description=__doc__)

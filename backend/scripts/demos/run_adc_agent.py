@@ -26,11 +26,11 @@ from app.infrastructure.json_store import save_json
 
 def main() -> None:
     """
-    作用：运行一项供电任务。
-    输入：命令行参数；由 argparse 读取。
-    输出：无返回值；打印结果并按所选操作保存运行产物。
+    作用：运行加载 ADC 技能的供电核验演示。
+    输入：无
+    输出：无
     """
-    # 定义命令行输入，业务处理交给应用服务。
+    # 读取 PDF、电压与人工核对声明，准备供电演示任务。
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
@@ -45,7 +45,7 @@ def main() -> None:
         help="已对照本份 PDF 核对供电参数",
     )
 
-    # 解析并检查参数组合，非法输入不会触发业务执行。
+    # 解析命令行参数并为本次演示生成独立任务 ID。
     args = parser.parse_args()
     task_id = f"adc-{uuid4().hex}"
 
@@ -113,9 +113,7 @@ def main() -> None:
     run_dir = RUNTIME_DIR / "adc_agent_runs" / task_id
     run_dir.mkdir(parents=True, exist_ok=False)
 
-    # 保存运行产物或清单，供后续查询和复核。
     save_json(run_dir / "task.json", task)
-    # 保存运行产物或清单，供后续查询和复核。
     save_json(run_dir / "document.json", index)
     (run_dir / "skill_snapshot.md").write_text(
         skill_text,
@@ -133,7 +131,6 @@ def main() -> None:
         "checkpointing": False,
     }
 
-    # 保存运行产物或清单，供后续查询和复核。
     save_json(run_dir / "manifest.json", manifest)
     print(f"任务目录：{run_dir}")
 
@@ -172,14 +169,11 @@ def main() -> None:
         workspace = state.get("files", {})
         todos = state.get("todos", [])
 
-        # 保存运行产物或清单，供后续查询和复核。
         save_json(
             run_dir / "messages.json",
             messages_to_dict(messages),
         )
-        # 保存运行产物或清单，供后续查询和复核。
         save_json(run_dir / "workspace.json", workspace)
-        # 保存运行产物或清单，供后续查询和复核。
         save_json(run_dir / "todos.json", todos)
 
         if session.result is None or session.evidence is None or session.fact is None:
@@ -221,7 +215,6 @@ def main() -> None:
         if report != expected:
             raise ValueError("报告未完整保留实际业务工具返回的判定。")
 
-        # 保存运行产物或清单，供后续查询和复核。
         save_json(run_dir / "report.json", report)
         manifest["status"] = "passed"
 
@@ -244,14 +237,12 @@ def main() -> None:
             ),
         }
 
-        # 保存运行产物或清单，供后续查询和复核。
         save_json(
             run_dir / "business_records.json",
             records,
         )
 
         manifest["finished_at"] = datetime.now(UTC).isoformat()
-        # 保存运行产物或清单，供后续查询和复核。
         save_json(run_dir / "manifest.json", manifest)
 
 

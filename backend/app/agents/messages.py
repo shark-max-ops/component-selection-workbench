@@ -5,10 +5,11 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 def successful_reads(messages: list) -> set[str]:
     """
-    作用：提取实际成功的文件读取路径。
-    输入：运行中的消息列表 messages。
-    输出：实际读取成功的虚拟文件路径集合。
+    作用：提取工具实际成功读取的虚拟文件路径。
+    输入：messages - 运行消息列表。
+    输出：set[str]，成功读取的文件路径集合。
     """
+    # 先收集成功工具响应的调用 ID，排除模型提出但未成功执行的请求。
     successful_ids = {
         item.tool_call_id
         for item in messages
@@ -17,6 +18,7 @@ def successful_reads(messages: list) -> set[str]:
 
     paths = set()
 
+    # 将成功响应与原读取请求对应，提取实际使用的文件路径。
     for message in messages:
         if not isinstance(message, AIMessage):
             continue

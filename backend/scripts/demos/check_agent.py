@@ -12,12 +12,12 @@ from app.infrastructure.llm import create_chat_model
 
 def main() -> None:
     """
-    作用：运行模型与 Agent 检查。
-    输入：backend/.env 中的模型配置。
-    输出：终端中的阶段结果；失败时抛出异常并返回非零退出码。
-    要点：会产生真实 API 调用；通过工具返回的随机标记验证执行。
-    边界：本检查不证明 PDF 解析、选型准确性或故障恢复已经实现。
+    作用：检查模型连接及 Agent 真实工具调用。
+    输入：无
+    输出：无
     """
+    # 会产生真实 API 调用；通过工具返回的随机标记验证执行。
+    # 本检查不证明 PDF 解析、选型准确性或故障恢复已经实现。
     settings = load_settings()
     print("[1/3] 配置检查通过")
     print(f"当前模型：{settings.llm_model}")
@@ -37,11 +37,11 @@ def main() -> None:
     @tool
     def get_runtime_probe() -> str:
         """
-        作用：读取本次运行的检查标记。
-        输入：无。
-        输出：当前进程生成的随机字符串。
-        要点：只用于验证工具执行，不读取文件或访问网络。
+        作用：读取当前运行的随机检查标记。
+        输入：无
+        输出：str，当前进程生成的随机标记。
         """
+        # 只用于验证工具执行，不读取文件或访问网络。
         return probe_token
 
     agent = create_deep_agent(

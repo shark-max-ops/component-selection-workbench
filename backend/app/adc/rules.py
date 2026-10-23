@@ -18,11 +18,11 @@ def check_supply_voltage(
     document: RegisteredDocument,
 ) -> ConstraintResult:
     """
-    作用：执行单条供电核验。
-    输入：需求、参数声明、原文证据和当前导入的文档。
-    输出：满足、不满足或待确认的单项结果。
-    边界：只支持本轮提取器；不代表整机适用，不汇总多来源冲突。
+    作用：核验需求电压是否处于推荐供电范围内。
+    输入：requirements - 需求；fact - 参数声明；evidence - 原文证据；document - 已登记文档。
+    输出：ConstraintResult，供电单项判定及未解决项。
     """
+    # 只支持本轮提取器；不代表整机适用，不汇总多来源冲突。
     problems = []
 
     if fact.part_number not in requirements.candidate_parts:

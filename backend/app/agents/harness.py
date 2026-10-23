@@ -38,12 +38,13 @@ def create_workbench_agent(
     middleware: list[AgentMiddleware] | None = None,
 ) -> CompiledStateGraph:
     """
-    作用：创建工作台 Agent。
-    输入：业务工具、Skill、提示词、检查点和附加 Middleware。
-    输出：可调用的 DeepAgents 图对象。
-    要点：保留统一文件权限，旧入口不传新参数时行为不变。
-    边界：StateBackend 的跨进程保存依赖持久化 Checkpointer。
+    作用：装配模型、工具、权限与中间件并创建 Agent。
+    输入：tools - 业务工具；skills - 技能目录；system_prompt - 提示词；
+          checkpointer - 检查点存储；middleware - 附加中间件。
+    输出：CompiledStateGraph，可执行的 Agent 图。
     """
+    # 保留统一文件权限，旧入口不传新参数时行为不变。
+    # StateBackend 的跨进程保存依赖持久化 Checkpointer。
     model = create_chat_model(load_settings())
 
     return create_deep_agent(

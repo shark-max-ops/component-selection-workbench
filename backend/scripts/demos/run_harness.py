@@ -28,11 +28,11 @@ from app.contracts import (
 
 def save_json(path: Path, data: object) -> None:
     """
-    作用：保存 JSON。
-    输入：目标路径和可序列化对象。
-    输出：UTF-8 文件。
-    边界：调用方负责创建父目录。
+    作用：将对象保存为 UTF-8 JSON 文件。
+    输入：path - 目标路径；data - 可序列化对象。
+    输出：无
     """
+    # 调用方负责创建父目录。
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -41,11 +41,12 @@ def save_json(path: Path, data: object) -> None:
 
 def validate_snapshot(payload: dict) -> dict:
     """
-    作用：检查源快照结构和本轮引用关系。
-    输入：供电脚本保存的 JSON 对象。
-    输出：规范化后的四类业务对象。
-    边界：不重新读取 PDF，也不替代原来的供电核验规则。
+    作用：校验源快照的数据结构及跨对象引用。
+    输入：payload - 供电核验 JSON 快照。
+    输出：dict，规范化后的需求、证据、参数及判定快照。
     """
+    # 不重新读取 PDF，也不替代原来的供电核验规则。
+    # 先校验四类业务对象的字段，再检查它们之间的引用链。
     requirements = AdcRequirements.model_validate(payload["requirements"])
     evidence = Evidence.model_validate(payload["evidence"])
     fact = ParameterFact.model_validate(payload["parameter_fact"])
@@ -73,11 +74,12 @@ def validate_snapshot(payload: dict) -> dict:
 
 def main() -> None:
     """
-    作用：执行一次有边界的 Harness 检查。
-    输入：--source 指定的既有供电核验 JSON。
-    输出：独立目录中的输入、消息、虚拟文件、报告和运行摘要。
-    边界：会调用真实模型；失败时只保存已经返回给宿主的数据。
+    作用：执行 Harness 检查并归档运行证据。
+    输入：无
+    输出：无
     """
+    # 会调用真实模型；失败时只保存已经返回给宿主的数据。
+    # 从命令行读取源快照路径，不重新执行 PDF 提取。
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
     args = parser.parse_args()
@@ -155,6 +157,7 @@ def main() -> None:
         save_json(run_dir / "workspace.json", files)
         save_json(run_dir / "todos.json", todos)
 
+        # 从工具响应核对必要操作，避免只依据模型的完成声明。
         successful_tools = [
             message.name
             for message in messages
@@ -177,6 +180,7 @@ def main() -> None:
         if "/inputs/snapshot.json" not in files:
             raise ValueError("Agent 删除了虚拟输入文件。")
 
+        # 对比原输入和实际报告，检查内容保留与任务标记。
         saved_input = file_data_to_string(files["/inputs/snapshot.json"])
         if saved_input != input_text:
             raise ValueError("Agent 修改了虚拟输入文件。")
@@ -199,11 +203,13 @@ def main() -> None:
             f"业务判定：{report['constraint_result']['status']}"  # 任务状态和业务状态分开
         )
 
+    # 失败时保留异常类型，不把运行失败解释为器件不满足。
     except (Exception, KeyboardInterrupt) as exc:
         manifest["status"] = "failed"
         manifest["error_type"] = type(exc).__name__
         raise
 
+    # 无论运行结果如何，都更新结束时间与清单。
     finally:
         manifest["finished_at"] = datetime.now(UTC).isoformat()
         save_json(run_dir / "manifest.json", manifest)

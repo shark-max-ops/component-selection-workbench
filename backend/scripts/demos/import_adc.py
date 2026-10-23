@@ -16,11 +16,12 @@ SOURCE_URL = "https://www.ti.com/lit/ds/symlink/ads1115.pdf"
 
 def main() -> None:
     """
-    作用：运行导入与供电演示。
-    输入：PDF 路径、需求电压和可选的人工已核对标记。
-    输出：文档版本目录，以及每次独立保存的 JSON 结果。
-    边界：不调用模型；--reviewed 仅在实际核对 PDF 后使用。
+    作用：导入 PDF 并运行供电核验演示。
+    输入：无
+    输出：无
     """
+    # 不调用模型；--reviewed 仅在实际核对 PDF 后使用。
+    # 从命令行读取 PDF、电压及人工核对声明。
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
@@ -48,6 +49,7 @@ def main() -> None:
         min_samples_per_channel_sps="1000",
     )
 
+    # 登记文档并提取供电证据，审核声明仅来自操作者输入。
     document = register_pdf(
         args.pdf,
         SOURCE_URL,
@@ -57,6 +59,7 @@ def main() -> None:
     evidence, fact = extract_ads1115_supply(document)
     fact.reviewed = args.reviewed
 
+    # 由程序规则给出单项判定，未审核时继续保留未知结果。
     result = check_supply_voltage(
         requirements,
         fact,
@@ -81,6 +84,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    # 展示证据定位、程序判定及仍待确认的问题。
     print(f"版本：{document.version}；页数：{len(document.pages)}")
     print(f"PDF 页序：{evidence.pdf_page}；印刷页码：未登记")
     print(f"供电参数：{fact.value}")

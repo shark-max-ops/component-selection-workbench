@@ -13,12 +13,13 @@ from app.infrastructure.documents import RegisteredDocument
 
 @pytest.fixture
 def supply_case():
-    """构造合成案例。
-
-    输入：无。
-    输出：需求、文档、证据和已审核的参数声明。
-    边界：文本仅模拟提取器所需格式，不作为真实器件证据。
     """
+    作用：构造合成供电核验案例。
+    输入：无
+    输出：tuple，需求、文档、证据和已审核参数声明。
+    """
+    # 文本仅模拟提取器所需格式，不作为真实器件证据。
+    # 合成提取器所需的推荐工作条件表，不使用真实器件资料。
     text = (
         "ADS1115 SBAS444E\n"
         "5.3 Recommended Operating Conditions\n"
@@ -45,6 +46,7 @@ def supply_case():
         required_channels=4,
     )
 
+    # 默认案例已审核，各测试再覆盖待测电压或参数条件。
     evidence, fact = extract_ads1115_supply(document)
     fact.reviewed = True
 
@@ -62,7 +64,11 @@ def supply_case():
     ],
 )
 def test_supply_boundaries(supply_case, voltage, expected):
-    """包含边界值；超出推荐范围时不能通过。"""
+    """
+    作用：包含边界值；超出推荐范围时不能通过。
+    输入：supply_case - 合成供电案例；voltage - 待测供电电压；expected - 期望的供电判定。
+    输出：无
+    """
     requirements, document, evidence, fact = supply_case
     requirements.supply_voltage_v = voltage
 
@@ -76,7 +82,11 @@ def test_supply_boundaries(supply_case, voltage, expected):
     ["typical", "absolute_maximum", "unknown"],
 )
 def test_unsuitable_specification(supply_case, specification):
-    """不能把典型值、绝对最大额定值或未知类别当成正常供电依据。"""
+    """
+    作用：不能把典型值、绝对最大额定值或未知类别当成正常供电依据。
+    输入：supply_case - 合成供电案例；specification - 待测规格类别。
+    输出：无
+    """
     requirements, document, evidence, fact = supply_case
     fact.specification = specification
 
@@ -86,7 +96,11 @@ def test_unsuitable_specification(supply_case, specification):
 
 
 def test_unreviewed_fact(supply_case):
-    """未审核参数保持待确认。"""
+    """
+    作用：未审核参数保持待确认。
+    输入：supply_case - 合成供电案例。
+    输出：无
+    """
     requirements, document, evidence, fact = supply_case
     fact.reviewed = False
 
@@ -96,7 +110,11 @@ def test_unreviewed_fact(supply_case):
 
 
 def test_changed_value(supply_case):
-    """即使修改后的范围能覆盖需求，也不能绕过原文一致性检查。"""
+    """
+    作用：即使修改后的范围能覆盖需求，也不能绕过原文一致性检查。
+    输入：supply_case - 合成供电案例。
+    输出：无
+    """
     requirements, document, evidence, fact = supply_case
     fact.value.upper = "7"
 
@@ -106,7 +124,11 @@ def test_changed_value(supply_case):
 
 
 def test_wrong_reference(supply_case):
-    """引用另一个证据 ID 时不能通过。"""
+    """
+    作用：引用另一个证据 ID 时不能通过。
+    输入：supply_case - 合成供电案例。
+    输出：无
+    """
     requirements, document, evidence, fact = supply_case
     fact.evidence_ids = ["another-evidence"]
 
@@ -116,7 +138,11 @@ def test_wrong_reference(supply_case):
 
 
 def test_unsupported_version(supply_case):
-    """不能沿用旧提取器直接核验另一版本。"""
+    """
+    作用：不能沿用旧提取器直接核验另一版本。
+    输入：supply_case - 合成供电案例。
+    输出：无
+    """
     requirements, document, evidence, fact = supply_case
     other_version = replace(document, version="SBAS444F")
 

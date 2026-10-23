@@ -7,12 +7,12 @@ from app.config import Settings
 
 def create_chat_model(settings: Settings) -> ChatOpenAI:
     """
-    作用：创建兼容 OpenAI Chat Completions 接口的客户端。
-    输入：经过检查的项目配置。
-    输出：ChatOpenAI 实例。
-    要点：设置单次请求超时和有限重试；创建对象时不发起请求。
-    边界：服务商的扩展字段或特殊推理模式，需要后续单独适配。
+    作用：创建兼容 Chat Completions 的模型客户端。
+    输入：settings - 校验通过的项目配置。
+    输出：ChatOpenAI 模型客户端。
     """
+    # 设置单次请求超时和有限重试；创建对象时不发起请求。
+    # 服务商的扩展字段或特殊推理模式，需要后续单独适配。
     return ChatOpenAI(
         model=settings.llm_model,
         api_key=settings.llm_api_key,

@@ -12,8 +12,8 @@ from app.agents.events import RunEvents
 def test_terminal_commands(tmp_path, monkeypatch):
     """
     作用：验证打开、查询、对话和退出使用正确服务边界。
-    输入：临时目录与 monkeypatch。
-    输出：无返回值；断言只有普通消息触发模型服务。
+    输入：tmp_path - pytest 临时目录；monkeypatch - pytest 依赖替换工具。
+    输出：无
     """
     # 用可控服务隔离终端分发；真实执行另由服务测试覆盖。
     calls, output = [], []
@@ -22,9 +22,9 @@ def test_terminal_commands(tmp_path, monkeypatch):
 
     def send(task_id, message, **kwargs):
         """
-        作用：记录终端提交的普通消息。
-        输入：任务标识、消息与额外服务参数。
-        输出：合成的解释和结构化结果。
+        作用：记录普通消息的服务调用并返回固定答复。
+        输入：task_id - 任务 ID；message - 用户消息；kwargs - 其他服务参数。
+        输出：dict，合成模型答复和程序报告。
         """
         # 记录调用次数，防止查询或未知命令误触模型。
         calls.append((task_id, message))
@@ -52,8 +52,8 @@ def test_terminal_commands(tmp_path, monkeypatch):
 def test_failed_tool_events(tmp_path):
     """
     作用：验证工具抛异常也有配对的失败事件。
-    输入：pytest 临时目录。
-    输出：无返回值；断言异常类型和调用标识被记录。
+    输入：tmp_path - pytest 临时目录。
+    输出：无
     """
     # 使用固定异常模拟真实工具失败，不伪造成功事件。
     events = RunEvents("task-test", "run-test", tmp_path / "events.jsonl")
@@ -61,9 +61,9 @@ def test_failed_tool_events(tmp_path):
 
     def fail(request):
         """
-        作用：制造可控工具异常。
-        输入：工具请求。
-        输出：抛出 ValueError，无正常返回值。
+        作用：模拟实际工具执行失败。
+        输入：request - 工具请求。
+        输出：无
         """
         # 固定故障只用于验证中间件，不访问文件。
         raise ValueError("synthetic failure")
@@ -73,3 +73,51 @@ def test_failed_tool_events(tmp_path):
     records = [json.loads(line) for line in events.path.read_text().splitlines()]
     assert [r["type"] for r in records] == ["tool_started", "tool_failed"]
     assert records[-1]["payload"]["reason"] == "ValueError"
+
+
+def test_review_command(tmp_path, monkeypatch):
+    """
+    作用：审核命令只提交宿主服务，格式错误时不写入，也不触发模型。
+    输入：tmp_path - pytest 临时目录；monkeypatch - pytest 依赖替换工具。
+    输出：无
+    """
+    # 固定服务响应，单独验证命令解析与服务参数传递。
+    calls, output = [], []
+    monkeypatch.setattr(terminal, "load_task", lambda *a, **k: {"task_id": "task-test"})
+
+    def review(task_id, **kwargs):
+        """
+        作用：记录审核命令的服务参数并返回固定审核结果。
+        输入：task_id - 任务 ID；kwargs - 审核请求参数。
+        输出：dict，包含审核版本及合成报告。
+        """
+        calls.append((task_id, kwargs))
+        return {"revision": 1, "report": {"status": "satisfied"}}
+
+    monkeypatch.setattr(terminal, "review_supply", review)
+    monkeypatch.setattr(terminal, "get_task_status", lambda *a, **k: {"reviews": [{"revision": 1}]})
+    # 同时输入错误格式和合法审核，确认只有合法请求提交到服务。
+    commands = iter(
+        [
+            "/open task-test",
+            "/review bad",
+            "/review r1 | 0 | tester | approve | 核对原文",
+            "/reviews",
+            "/exit",
+        ]
+    )
+    terminal.run_terminal(root=tmp_path, read=lambda _: next(commands), write=output.append)
+    assert calls == [
+        (
+            "task-test",
+            {
+                "request_id": "r1",
+                "expected_revision": 0,
+                "reviewer": "tester",
+                "decision": "approve",
+                "note": "核对原文",
+                "root": tmp_path,
+            },
+        )
+    ]
+    assert any("本次未调用模型" in line for line in output)

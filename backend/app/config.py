@@ -16,12 +16,13 @@ RUNTIME_DIR = PROJECT_DIR / "runtime"
 
 @dataclass(frozen=True)
 class Settings:
-    """保存配置。
-
-    输入：经过检查的密钥、接口地址和模型名称。
-    输出：不可直接修改的配置对象。
-    要点：密钥使用 SecretStr，避免打印配置时直接显示密钥。
     """
+    作用：保存不可变的模型配置。
+    输入：llm_api_key - 密钥；llm_base_url - 接口地址；llm_model - 模型名称。
+    输出：Settings 配置对象。
+    """
+
+    # 密钥使用 SecretStr，避免打印配置时直接显示密钥。
 
     llm_api_key: SecretStr
     llm_base_url: str
@@ -29,12 +30,13 @@ class Settings:
 
 
 def _read_required(name: str) -> str:
-    """读取一个必填环境变量。
-
-    输入：环境变量名称。
-    输出：去除首尾空白的字符串。
-    边界：变量不存在或为空时，只报告变量名，不输出变量内容。
     """
+    作用：读取并检查必填环境变量。
+    输入：name - 环境变量名称。
+    输出：str，去除首尾空白的非空配置值。
+    """
+    # 变量不存在或为空时，只报告变量名，不输出变量内容。
+    # 去除空白后检查必填项，缺失时只报告变量名称。
     value = os.getenv(name, "").strip()
     if not value:
         raise ValueError(f"缺少配置：{name}，请检查 backend/.env。")
@@ -42,18 +44,19 @@ def _read_required(name: str) -> str:
 
 
 def load_settings() -> Settings:
-    """读取模型配置并进行基础检查。
-
-    输入：backend/.env 和当前进程环境变量。
-    输出：Settings 对象。
-    要点：已有进程环境变量优先；这里只检查格式，不验证远程服务。
     """
+    作用：读取并校验模型配置。
+    输入：无
+    输出：Settings，校验通过的模型配置。
+    """
+    # 已有进程环境变量优先；这里只检查格式，不验证远程服务。
     load_dotenv(BACKEND_DIR / ".env", override=False)
 
     api_key = _read_required("LLM_API_KEY")
     base_url = _read_required("LLM_BASE_URL")
     model = _read_required("LLM_MODEL")
 
+    # 校验接口地址的协议与主机，并拒绝凭据、查询参数和片段。
     try:
         parsed = urlsplit(base_url)
         valid_url = (

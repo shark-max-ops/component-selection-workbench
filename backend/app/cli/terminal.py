@@ -3,11 +3,20 @@
 import json
 from pathlib import Path
 
-from app.services.task_service import ROOT, create_task, get_task_status, load_task, send_message
+from app.services.task_service import (
+    ROOT,
+    create_task,
+    get_task_status,
+    load_task,
+    review_supply,
+    send_message,
+)
 
 HELP = """/new [电压]：创建任务，默认 3.3 V；可用 /new 3.3 | PDF路径 指定资料
 /tasks：列出任务   /open 任务ID：打开任务
 /status：查看状态   /evidence：查看证据   /report：查看程序结果
+/review 请求ID | 当前审核版本 | 审核人 | approve或reject | 说明：审核并重新核验
+/reviews：查看审核历史；先查看 /status 和 /evidence 并对照 PDF 核对参数及条件
 /help：帮助   /exit：退出
 普通中文消息：发送给当前任务并执行。当前仅核验 ADS1115 供电。
 接口、分辨率、通道和采样能力尚未核验；新任务采用固定示例需求。"""
@@ -15,9 +24,9 @@ HELP = """/new [电压]：创建任务，默认 3.3 V；可用 /new 3.3 | PDF路
 
 def show_event(event, write=print):
     """
-    作用：把真实工具和运行事件显示为简短中文进度。
-    输入：事件字典 event 和输出函数 write。
-    输出：无返回值；显示事件序号、类型和必要位置。
+    作用：把真实工具和运行事件展示为中文进度。
+    输入：event - 事件字典；write - 输出函数。
+    输出：无
     """
     # 只展示可观察事件，不生成思维过程或估算百分比。
     labels = {
@@ -37,9 +46,9 @@ def show_event(event, write=print):
 
 def run_terminal(*, root: Path = ROOT, read=input, write=print):
     """
-    作用：运行终端命令循环，复用应用服务管理任务和中文对话。
-    输入：任务根目录 root、输入函数 read、输出函数 write。
-    输出：无返回值；用户退出或中断时结束循环。
+    作用：运行终端命令循环并分发查询、审核与对话。
+    输入：root - 任务根目录；read - 输入函数；write - 输出函数。
+    输出：无
     """
     # 选中的任务只保存在当前终端，重启后使用 /open 找回。
     current = None
@@ -82,7 +91,13 @@ def run_terminal(*, root: Path = ROOT, read=input, write=print):
                 continue
 
             # 拼错命令直接提示，避免把命令文本误发给付费模型。
-            if command.startswith("/") and command not in {"/status", "/evidence", "/report"}:
+            if command.startswith("/") and command not in {
+                "/status",
+                "/evidence",
+                "/report",
+                "/review",
+                "/reviews",
+            }:
                 write("未知命令，请输入 /help。")
                 continue
             if current is None:
@@ -90,11 +105,37 @@ def run_terminal(*, root: Path = ROOT, read=input, write=print):
                 continue
 
             # 查询直接读取保存的记录；报告显示结构化程序结果。
-            if command in {"/status", "/evidence", "/report"}:
+            if command in {"/status", "/evidence", "/report", "/reviews"}:
                 status = get_task_status(current, root=root)
                 key = {"/evidence": "evidence", "/report": "constraint_result"}.get(command)
-                value = status if key is None else status["adc_records"].get(key)
+                value = (
+                    status["reviews"]
+                    if command == "/reviews"
+                    else status
+                    if key is None
+                    else status["adc_records"].get(key)
+                )
                 write(json.dumps(value, ensure_ascii=False, indent=2) if value else "尚无记录。")
+                write("范围：仅供电；其他要求尚未核验。")
+                continue
+
+            if command == "/review":
+                fields = [item.strip() for item in argument.split("|", 4)]
+                if len(fields) != 5:
+                    write("用法：/review 请求ID | 当前审核版本 | 审核人 | approve或reject | 说明")
+                    continue
+                request_id, revision, reviewer, decision, note = fields
+                record = review_supply(
+                    current,
+                    request_id=request_id,
+                    expected_revision=int(revision),
+                    reviewer=reviewer,
+                    decision=decision,
+                    note=note,
+                    root=root,
+                )
+                write(f"已保存审核版本 {record['revision']}；本次未调用模型。")
+                write(json.dumps(record["report"], ensure_ascii=False, indent=2))
                 write("范围：仅供电；其他要求尚未核验。")
                 continue
 

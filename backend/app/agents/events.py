@@ -11,16 +11,16 @@ from langgraph.types import Command
 
 class RunEvents(AgentMiddleware):
     """
-    作用：将真实工具调用转换为有序事件，并保存到当前运行目录。
-    输入：任务标识、运行标识、事件文件路径和可选展示回调。
-    输出：工具中间件；事件逐行写入 JSONL，不保存内部思维或完整工具内容。
+    作用：将真实工具调用记录为有序运行事件。
+    输入：task_id - 任务 ID；run_id - 运行 ID；path - 事件文件；on_event - 可选回调。
+    输出：RunEvents 事件中间件对象。
     """
 
     def __init__(self, task_id, run_id, path, on_event=None):
         """
-        作用：绑定本次运行的事件出口。
-        输入：任务与运行标识、文件路径、可选回调 on_event。
-        输出：初始化后的事件记录器。
+        作用：绑定当前运行的事件出口并初始化序号与锁。
+        输入：task_id - 任务 ID；run_id - 运行 ID；path - 事件文件；on_event - 可选回调。
+        输出：无
         """
         # 每次运行从 1 编号；锁保证并行工具写入时不混行。
         self.task_id, self.run_id = task_id, run_id
@@ -30,9 +30,9 @@ class RunEvents(AgentMiddleware):
 
     def emit(self, event_type, **payload):
         """
-        作用：保存并展示一条真实事件。
-        输入：事件类型和必要载荷。
-        输出：无返回值；追加事件文件并通知展示回调。
+        作用：追加事件记录并通知展示回调。
+        输入：event_type - 事件类型；payload - 事件载荷。
+        输出：无
         """
         # 先落盘再通知界面，界面故障不能破坏业务执行。
         with self.lock:
@@ -56,9 +56,9 @@ class RunEvents(AgentMiddleware):
 
     def wrap_tool_call(self, request, handler):
         """
-        作用：围绕真实工具执行记录成对的开始和终止事件。
-        输入：框架工具请求 request 与真实执行器 handler。
-        输出：未经改写的工具响应；异常记录后继续抛出。
+        作用：记录工具执行的开始、结束或失败事件。
+        输入：request - 工具请求；handler - 实际执行器。
+        输出：工具原始响应。
         """
         # 只展示名称、调用标识和文件位置，不记录完整工具参数。
         call = request.tool_call

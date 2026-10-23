@@ -6,9 +6,9 @@ from pathlib import Path
 
 def save_json(path: Path, data: object) -> None:
     """
-    作用：保存 UTF-8 JSON；父目录须由调用方创建。
-    输入：目标文件路径 path 和待保存数据 data。
-    输出：无返回值；将 JSON 写入指定文件。
+    作用：将对象保存为 UTF-8 JSON 文件。
+    输入：path - 目标路径；data - 可序列化对象。
+    输出：无
     """
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),

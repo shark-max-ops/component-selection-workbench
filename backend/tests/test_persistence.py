@@ -20,19 +20,36 @@ from app.contracts import ConstraintResult, Evidence, NumericValue, ParameterFac
 
 
 class OfflineModel(FakeMessagesListChatModel):
-    """只生成固定消息；图与检查点仍由真实框架执行。"""
+    """
+    作用：提供固定响应以验证真实图和检查点。
+    输入：responses - 固定模型响应列表；其他父类模型字段。
+    输出：OfflineModel 离线模型对象。
+    """
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):
-        """接受工具绑定，保留测试响应游标。"""
+        """
+        作用：接受工具绑定并保留测试响应游标。
+        输入：tools - 工具列表；tool_choice - 工具选择策略；kwargs - 其他绑定选项。
+        输出：当前离线模型对象。
+        """
         return self
 
     def get_num_tokens_from_messages(self, messages, tools=None):
-        """提供测试粗略计数，不加载外部 tokenizer。"""
+        """
+        作用：提供不依赖外部 tokenizer 的测试计数。
+        输入：messages - 消息列表；tools - 可选工具列表。
+        输出：int，测试用的粗略 token 数量。
+        """
         return 1 + sum(len(str(item.content)) for item in messages) // 4
 
 
 def child_run(database: str, phase: str) -> None:
-    """子进程执行器；第一次保存，第二次在新对象中续接。"""
+    """
+    作用：在子进程中保存或续接固定线程。
+    输入：database - 检查点数据库路径；phase - write 或 read 阶段。
+    输出：无
+    """
+    # 每个进程从空业务对象开始，恢复能力由后续图执行验证。
     session = SimpleNamespace(
         evidence=None,
         fact=None,
@@ -41,7 +58,11 @@ def child_run(database: str, phase: str) -> None:
 
     @tool
     def read_adc_supply_evidence() -> dict:
-        """生成合成证据，仅测试状态保存，不测试 PDF 提取。"""
+        """
+        作用：生成供状态持久化测试使用的合成证据和参数。
+        输入：无
+        输出：dict，包含 ok 成功标记。
+        """
         session.evidence = Evidence(
             id="ev-test",
             document_id="doc-test",
@@ -67,7 +88,11 @@ def child_run(database: str, phase: str) -> None:
 
     @tool
     def check_adc_supply() -> dict:
-        """要求证据已存在，在新进程中检查业务对象是否恢复。"""
+        """
+        作用：检查业务对象已恢复并生成合成判定。
+        输入：无
+        输出：dict，包含 ok 成功标记。
+        """
         assert session.evidence is not None
         assert session.fact is not None
 
@@ -84,6 +109,7 @@ def child_run(database: str, phase: str) -> None:
         )
         return {"ok": True}
 
+    # 写入阶段读取证据，续接阶段只核验已恢复的业务对象。
     names = [
         "write_todos",
         "read_adc_supply_evidence",
@@ -93,6 +119,7 @@ def child_run(database: str, phase: str) -> None:
         # 第二进程不重新执行证据读取工具。
         names = ["check_adc_supply"]
 
+    # 构造固定工具请求，实际图与检查点继续使用框架实现。
     responses = [
         AIMessage(
             content="",
@@ -127,6 +154,7 @@ def child_run(database: str, phase: str) -> None:
         "recursion_limit": 40,
     }
 
+    # 两个阶段绑定相同数据库与线程，保持文件和业务状态连续。
     with SqliteSaver.from_conn_string(database) as saver:
         agent = harness.create_workbench_agent(
             tools=[
@@ -188,6 +216,7 @@ def child_run(database: str, phase: str) -> None:
                 if isinstance(item, ToolMessage)
             )
 
+        # 输出结构化摘要，供父进程比较结果和消息历史。
         saved = agent.get_state(config)
         print(
             json.dumps(
@@ -200,7 +229,12 @@ def child_run(database: str, phase: str) -> None:
 
 
 def test_two_processes_restore_state_and_business(tmp_path):
-    """第一进程退出后，第二进程找回图状态并恢复业务对象。"""
+    """
+    作用：第一进程退出后，第二进程找回图状态并恢复业务对象。
+    输入：tmp_path - pytest 临时目录。
+    输出：无
+    """
+    # 子进程共享项目代码与数据库，关闭外部追踪并固定输出编码。
     env = os.environ | {
         "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
         "LANGSMITH_TRACING": "false",
@@ -208,6 +242,7 @@ def test_two_processes_restore_state_and_business(tmp_path):
         "PYTHONUTF8": "1",
     }
 
+    # 先让写入进程正常退出，再由独立进程续接同一线程。
     results = []
     for phase in ["write", "read"]:
         completed = subprocess.run(
@@ -231,7 +266,11 @@ def test_two_processes_restore_state_and_business(tmp_path):
 
 
 def test_repeated_records_are_idempotent():
-    """重复写入不追加条目，空值不抹掉已有记录。"""
+    """
+    作用：重复写入不追加条目，空值不抹掉已有记录。
+    输入：无
+    输出：无
+    """
     record = {"evidence": {"id": "ev-test"}}
 
     assert merge_adc_records(record, record) == record
@@ -239,7 +278,11 @@ def test_repeated_records_are_idempotent():
 
 
 def test_conflicting_records_are_rejected():
-    """当前任务输入固定，不允许静默替换已保存记录。"""
+    """
+    作用：当前任务输入固定，不允许静默替换已保存记录。
+    输入：无
+    输出：无
+    """
     with pytest.raises(ValueError):
         merge_adc_records(
             {"evidence": {"id": "one"}},
@@ -248,7 +291,11 @@ def test_conflicting_records_are_rejected():
 
 
 def test_empty_state_restores_nothing():
-    """新线程没有业务记录时保持空对象。"""
+    """
+    作用：新线程没有业务记录时保持空对象。
+    输入：无
+    输出：无
+    """
     session = SimpleNamespace(
         evidence=None,
         fact=None,

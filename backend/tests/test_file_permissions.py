@@ -19,26 +19,48 @@ SEED = {
 
 
 class OfflineToolModel(FakeMessagesListChatModel):
-    """只回放工具请求，不理解任务，也不连接模型服务。"""
+    """
+    作用：回放预设工具请求以隔离远程模型服务。
+    输入：responses - 固定模型响应列表；其他父类模型字段。
+    输出：OfflineToolModel 离线模型对象。
+    """
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):
-        """接受框架工具绑定，保留同一个实例的响应游标。"""
+        """
+        作用：接受工具绑定并保留模型响应游标。
+        输入：tools - 工具列表；tool_choice - 工具选择策略；kwargs - 其他绑定选项。
+        输出：当前离线模型对象。
+        """
         return self
 
     def get_num_tokens_from_messages(self, messages, tools=None):
-        """提供测试用粗略计数，避免加载外部 tokenizer；不用于费用统计。"""
+        """
+        作用：提供测试用的粗略消息计数。
+        输入：messages - 消息列表；tools - 可选工具列表。
+        输出：int，测试用的粗略 token 数量。
+        """
         return 1 + sum(len(str(item.content)) for item in messages) // 4
 
 
 @pytest.fixture
 def run_operation(monkeypatch):
-    """运行真实 Agent 工厂，但替换配置读取和付费模型创建。"""
+    """
+    作用：替换模型依赖并提供文件工具执行函数。
+    输入：monkeypatch - pytest 依赖替换工具。
+    输出：执行单个工具请求的 run 函数。
+    """
+    # 关闭外部追踪并替换配置读取，测试仅使用离线模型。
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     monkeypatch.setattr(harness, "load_settings", lambda: None)
 
     def run(name, args):
-        """输入一个工具请求，输出工具返回和最终虚拟文件。"""
+        """
+        作用：执行预设文件工具请求并提取最终虚拟文件。
+        输入：name - 工具名称；args - 工具参数。
+        输出：tuple，工具响应和最终文件内容字典。
+        """
+        # 固定模型只发出一个工具请求，文件操作仍由真实框架执行。
         model = OfflineToolModel(
             responses=[
                 AIMessage(
@@ -76,6 +98,7 @@ def run_operation(monkeypatch):
             config={"recursion_limit": 8},
         )
 
+        # 匹配本次调用的唯一工具响应，并导出最终工作区供断言使用。
         replies = [
             item
             for item in state["messages"]
@@ -104,7 +127,11 @@ def run_operation(monkeypatch):
     ],
 )
 def test_allowed_read(run_operation, path):
-    """读取已有文件成功，内容未变。"""
+    """
+    作用：读取已有文件成功，内容未变。
+    输入：run_operation - 文件工具执行函数；path - 待测虚拟文件路径。
+    输出：无
+    """
     reply, files = run_operation(
         "read_file",
         {"file_path": path},
@@ -116,7 +143,11 @@ def test_allowed_read(run_operation, path):
 
 
 def test_skill_directory_can_be_listed(run_operation):
-    """目录本身也要能匹配读取规则。"""
+    """
+    作用：目录本身也要能匹配读取规则。
+    输入：run_operation - 文件工具执行函数。
+    输出：无
+    """
     reply, files = run_operation(
         "ls",
         {"path": "/skills"},
@@ -132,7 +163,11 @@ def test_skill_directory_can_be_listed(run_operation):
     ["/outputs/new.json", "/outputs/nested/new.json"],
 )
 def test_allowed_create(run_operation, path):
-    """允许在报告目录及子目录创建文件。"""
+    """
+    作用：允许在报告目录及子目录创建文件。
+    输入：run_operation - 文件工具执行函数；path - 待测虚拟文件路径。
+    输出：无
+    """
     reply, files = run_operation(
         "write_file",
         {"file_path": path, "content": "new"},
@@ -143,7 +178,11 @@ def test_allowed_create(run_operation, path):
 
 
 def test_allowed_overwrite(run_operation):
-    """允许覆盖已有报告，不能因框架不支持覆盖而误判权限。"""
+    """
+    作用：允许覆盖已有报告，不能因框架不支持覆盖而误判权限。
+    输入：run_operation - 文件工具执行函数。
+    输出：无
+    """
     reply, files = run_operation(
         "write_file",
         {
@@ -167,7 +206,11 @@ def test_allowed_overwrite(run_operation):
     ],
 )
 def test_denied_overwrite_preserves_files(run_operation, path):
-    """拒绝覆盖只读或未开放文件，检查整个工作区没有变化。"""
+    """
+    作用：拒绝覆盖只读或未开放文件，检查整个工作区没有变化。
+    输入：run_operation - 文件工具执行函数；path - 待测虚拟文件路径。
+    输出：无
+    """
     reply, files = run_operation(
         "write_file",
         {"file_path": path, "content": "changed"},
@@ -179,7 +222,11 @@ def test_denied_overwrite_preserves_files(run_operation, path):
 
 
 def test_denied_edit_preserves_input(run_operation):
-    """拒绝通过 edit_file 修改需求电压。"""
+    """
+    作用：拒绝通过 edit_file 修改需求电压。
+    输入：run_operation - 文件工具执行函数。
+    输出：无
+    """
     reply, files = run_operation(
         "edit_file",
         {
@@ -199,7 +246,11 @@ def test_denied_edit_preserves_input(run_operation):
     ["/documents/pages/0004.txt", "/documents"],
 )
 def test_denied_delete_preserves_documents(run_operation, path):
-    """删除文件或整目录均被拒绝，原文保留。"""
+    """
+    作用：删除文件或整目录均被拒绝，原文保留。
+    输入：run_operation - 文件工具执行函数；path - 待测虚拟文件路径。
+    输出：无
+    """
     reply, files = run_operation(
         "delete",
         {"file_path": path},
@@ -211,7 +262,11 @@ def test_denied_delete_preserves_documents(run_operation, path):
 
 
 def test_denied_read_existing_outside_file(run_operation):
-    """未开放文件即使存在也不能读取。"""
+    """
+    作用：未开放文件即使存在也不能读取。
+    输入：run_operation - 文件工具执行函数。
+    输出：无
+    """
     reply, files = run_operation(
         "read_file",
         {"file_path": "/outside.txt"},
@@ -224,7 +279,11 @@ def test_denied_read_existing_outside_file(run_operation):
 
 
 def test_denied_create_outside(run_operation):
-    """全局拒绝规则阻止在未知位置新建文件。"""
+    """
+    作用：全局拒绝规则阻止在未知位置新建文件。
+    输入：run_operation - 文件工具执行函数。
+    输出：无
+    """
     reply, files = run_operation(
         "write_file",
         {

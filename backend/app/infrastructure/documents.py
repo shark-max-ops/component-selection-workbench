@@ -1,4 +1,4 @@
-"""登记 PDF 内容快照、逐页提取文本，并读取首个 ADS111x 供电参数。"""
+"""登记 PDF 内容快照、归档原件并提取逐页文本。"""
 
 import hashlib
 import json
@@ -12,11 +12,13 @@ import pymupdf
 @dataclass(frozen=True)
 class RegisteredDocument:
     """
-    作用：保存一次导入结果。
-    输入：类定义字段或当前调用上下文，见下方说明。
-    输出：原有处理结果；具体返回值或副作用见下方实现。
-    pages 的索引从 0 开始，Evidence 中的 PDF 页序从 1 开始。
+    作用：保存登记后的文档版本和逐页文本。
+    输入：sha256 - 文件哈希；version - 版本；source_url - 来源网址；
+          directory - 存储目录；pages - 逐页文本。
+    输出：RegisteredDocument 文档对象。
     """
+
+    # pages 的索引从 0 开始，Evidence 中的 PDF 页序从 1 开始。
 
     sha256: str
     version: str
@@ -27,9 +29,9 @@ class RegisteredDocument:
     @property
     def id(self) -> str:
         """
-        作用：根据完整文件哈希生成稳定文档 ID，不依赖文件名。
-        输入：类定义字段或当前调用上下文，见下方说明。
-        输出：原有处理结果；具体返回值或副作用见下方实现。
+        作用：根据完整文件哈希生成稳定文档 ID。
+        输入：self - 当前文档对象。
+        输出：str，带 doc- 前缀的文档 ID。
         """
         return f"doc-{self.sha256}"
 
@@ -40,11 +42,12 @@ def register_pdf(
     storage: Path,
 ) -> RegisteredDocument:
     """
-    作用：登记并提取 PDF。
-    输入：本地 PDF、登记的来源网址、版本存储目录。
-    输出：文档对象、原文件副本、登记信息和每页文本。
-    边界：不执行 OCR；来源网址属于登记信息，不代表程序已验证来源。
+    作用：登记 PDF 内容快照并提取逐页文本。
+    输入：pdf_path - PDF 路径；source_url - 来源网址；storage - 版本存储目录。
+    输出：RegisteredDocument，已登记的文档对象。
     """
+    # 不执行 OCR；来源网址属于登记信息，不代表程序已验证来源。
+    # 读取内容并计算版本哈希，供原件归档与一致性校验使用。
     data = pdf_path.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
 
@@ -74,6 +77,7 @@ def register_pdf(
     else:
         snapshot.write_bytes(data)
 
+    # 按 PDF 页序保存逐页文本，供证据定位使用。
     page_dir = directory / "pages"
     page_dir.mkdir(exist_ok=True)
 
@@ -83,6 +87,7 @@ def register_pdf(
             encoding="utf-8",
         )
 
+    # 组织文档对象和登记清单，记录提取方式及页码基准。
     document = RegisteredDocument(
         sha256=digest,
         version=version,
